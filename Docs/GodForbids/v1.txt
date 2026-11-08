@@ -1,0 +1,122 @@
+Build the complete frontend for "HelpDesk", an IT support ticketing app.
+
+STACK
+Vue 3 (Composition API, <script setup>), TypeScript, Vite, Vue Router, Pinia. Plain CSS or Tailwind. Light theme, blue primary, Inter font, rounded cards. Desktop-first, mobile-friendly. API base URL comes from VITE_API_URL. JWT is stored in Pinia and localStorage and sent as a Bearer token. A 401 response logs the user out and redirects to /login.
+
+ROLES
+CLIENT, TECHNICIAN, ADMIN. Role badge colors: Client gray, Technician blue, Admin purple.
+Status badges: OPEN blue, IN_PROGRESS orange, RESOLVED green, CLOSED gray, CANCELLED red.
+Priority badges: LOW gray, MEDIUM yellow, HIGH red.
+
+ROUTES AND ACCESS
+/              Landing page (public)
+/login         Login (public)
+/register      Register (public)
+/tickets       My Tickets (CLIENT)
+/tickets/new   New Ticket (CLIENT)
+/tickets/:id   Ticket Detail (all logged-in roles)
+/queue         Ticket Queue (TECHNICIAN, ADMIN)
+/categories    Categories (ADMIN)
+/users         Users (ADMIN)
+
+Route guards:
+- Not logged in and visiting a protected route: redirect to /login.
+- Logged in and visiting /, /login or /register: redirect to the role's home.
+- Wrong role: redirect to the role's home.
+- Role home: CLIENT goes to /tickets. TECHNICIAN and ADMIN go to /queue.
+
+LAYOUT
+Public pages (/, /login, /register) have no sidebar. Logged-in pages have a top navbar and a left sidebar.
+- Navbar: logo (click goes to role home), page title, user menu (username, role badge, Logout). Logout clears the session and goes to /login.
+- Sidebar by role, nothing else:
+  - CLIENT: My Tickets (/tickets), New Ticket (/tickets/new)
+  - TECHNICIAN: Ticket Queue (/queue)
+  - ADMIN: Ticket Queue (/queue), Categories (/categories), Users (/users)
+- Sidebar collapses into a hamburger menu on mobile.
+
+PAGES
+
+1. Landing (/)
+- Sticky navbar: logo, links Features / How it works / Roles (smooth scroll), "Log in" button goes to /login, "Register" button goes to /register.
+- Hero: headline "Every IT issue tracked from report to resolution." Buttons: "Get started" goes to /register, "Log in" goes to /login.
+- Sections: 3 problem cards, 6 feature cards, 4-step "How it works" timeline, 3 role cards, final banner with "Create free account" going to /register, footer.
+
+2. Login (/login)
+- Fields: username, password. Button "Log in". Link "Create an account" goes to /register.
+- On success, go to the role home. On failure, show an inline error.
+
+3. Register (/register)
+- Fields: username (alphanumeric, min 3), password (min 6). Button "Register". Link "Back to login" goes to /login.
+- Validate on the client. Show the server's 400 error for duplicate usernames. On success, go to /login with a success message.
+
+4. My Tickets (/tickets), CLIENT
+- Header button "+ New Ticket" goes to /tickets/new.
+- Status filter tabs: All, Open, In Progress, Resolved, Closed, Cancelled.
+- Table columns: Title, Category, Priority, Status, Created, Actions. Only the client's own tickets.
+- Clicking a row goes to /tickets/:id.
+- A "Cancel" button appears only on OPEN rows. It opens a confirm modal; confirming sets the status to CANCELLED. Show a toast.
+- Empty state with a "Create your first ticket" button going to /tickets/new.
+
+5. New Ticket (/tickets/new), CLIENT
+- Fields: title, description, category dropdown (loaded from the API). Note: "Priority and status are set automatically."
+- Buttons: "Submit" creates the ticket and goes to /tickets/:id. "Cancel" link goes back to /tickets.
+
+6. Ticket Queue (/queue), TECHNICIAN and ADMIN
+- Search box (keyword in title or description).
+- Toggle: "Active" (OPEN, IN_PROGRESS; the default) or "Completed" (RESOLVED, CLOSED, CANCELLED).
+- Filter dropdowns: Status, Priority, Category. A "Reset filters" link.
+- Table columns (6 only): ID, Title, Priority, Status, Assigned To, Updated.
+  - The Title cell has the bold title on line 1 (truncated with an ellipsis) and "Author · Category" in small muted text on line 2.
+  - Assigned To is an initials avatar with a tooltip, or a dashed "unassigned" avatar.
+  - Updated is relative time ("2h ago") with the exact time as a tooltip.
+  - Use a fixed table layout. No horizontal scroll at 1280px.
+- Pagination: 10 per page, Prev / page numbers / Next.
+- Clicking a row goes to /tickets/:id.
+- On mobile, show stacked cards instead of the table.
+- Loading skeleton and empty state.
+
+7. Ticket Detail (/tickets/:id), all roles
+- Top: back link (CLIENT goes to /tickets, staff go to /queue), title, ID, status badge, priority badge, category, author, assigned technician or "Unassigned", created and updated dates, description.
+- Discussion timeline:
+  - Regular comment: avatar, name, role badge, time, text.
+  - System event (isSystem true): muted, centered line with an icon. It has no edit or delete option for anyone.
+- Comment box at the bottom with a "Post comment" button.
+- If the status is CLOSED or CANCELLED, hide the comment box and show the banner "This ticket is archived and locked."
+- Buttons by role and status:
+  - CLIENT (own ticket only): "Cancel Ticket" only when OPEN. "Close Ticket" only when RESOLVED.
+  - TECHNICIAN: a right-side "Staff Actions" panel with "Claim Ticket" (when unassigned), a Priority dropdown (Low, Medium, High), a Status dropdown (Open, In Progress, Resolved), and "Close Ticket" only when RESOLVED.
+  - ADMIN: everything the technician has, plus a trash icon on each regular comment (not on system events), with a confirm modal.
+- Every action refreshes the ticket and the timeline and shows a toast.
+- A CLIENT who opens someone else's ticket sees a 403 message.
+
+8. Categories (/categories), ADMIN
+- Header button "+ Add Category" opens a modal (name, description, Save, Cancel).
+- Responsive card grid (3 per row). Each card has an icon, name, description, a ticket count chip, and Edit and Delete icon buttons.
+- Edit opens the same modal, prefilled.
+- Delete is disabled with the tooltip "Cannot delete a category with active tickets" when the count is above 0. Otherwise it opens a confirm modal. Also show the server's 400 error as a toast.
+- Loading skeleton and empty state.
+
+9. Users (/users), ADMIN
+- Search box (by username) and filter tabs: All, Clients, Technicians, Admins.
+- Responsive card grid (3 per row). Each card has an initials avatar, username, role badge, "Joined <date>", and a Role dropdown (Client, Technician, Admin).
+- Changing the dropdown saves immediately and shows the toast "Role updated to X". Revert the dropdown if the save fails.
+- The current admin's own card has a "You" tag and a disabled dropdown.
+- Loading skeleton and empty search state.
+
+API (REST, JSON; adjust paths to match the backend)
+POST /auth/register, POST /auth/login
+GET /categories, POST /categories, PATCH /categories/:id, DELETE /categories/:id
+GET /tickets (query: page, limit=10, search, status, priority, categoryId, mine), POST /tickets, GET /tickets/:id
+PATCH /tickets/:id (status, priority, assignedToId), POST /tickets/:id/cancel, POST /tickets/:id/close
+GET /tickets/:id/comments, POST /tickets/:id/comments, DELETE /comments/:id
+GET /users, PATCH /users/:id/role
+
+GLOBAL UX RULES
+- Toasts for every success and error.
+- Loading skeletons on lists. Disable buttons while a request is running.
+- Confirm modals for cancel, delete and close actions.
+- Typed API layer (one file per resource) and typed interfaces for User, Category, Ticket, Comment.
+- Pinia stores: auth, tickets, categories, users.
+- Do NOT add features beyond this list (no notifications, settings, knowledge base, stats, or dashboards).
+
+Build in this order: project setup and router with guards, auth store, layout shell, Login and Register, then Client pages, then Queue and Ticket Detail, then Admin pages, then Landing.
