@@ -14,6 +14,12 @@ const search = ref('')
 const activeTab = ref<'ALL' | Role>('ALL')
 const savingUserIds = ref<Record<string, boolean>>({})
 
+const editingUser = ref<User | null>(null)
+const editUsername = ref('')
+const editRole = ref<Role>('CLIENT')
+const editError = ref('')
+const editSaving = ref(false)
+
 const tabs: { label: string; value: 'ALL' | Role }[] = [
   { label: 'All', value: 'ALL' },
   { label: 'Clients', value: 'CLIENT' },
@@ -94,6 +100,48 @@ async function onRoleChange(user: User, event: Event) {
     savingUserIds.value[key] = false
   }
 }
+
+function openEditModal(u: User) {
+  editingUser.value = u
+  editUsername.value = u.username
+  editRole.value = u.role
+  editError.value = ''
+}
+
+function closeEditModal() {
+  if (editSaving.value) return
+  editingUser.value = null
+}
+
+async function handleSaveEdit() {
+  if (!editingUser.value) return
+  editError.value = ''
+  const trimmed = editUsername.value.trim()
+  if (trimmed.length < 3) {
+    editError.value = 'Username must be at least 3 characters.'
+    return
+  }
+
+  editSaving.value = true
+  try {
+    const updated = await usersStore.updateUser(editingUser.value.id, {
+      username: trimmed,
+      role: isCurrentUser(editingUser.value) ? editingUser.value.role : editRole.value,
+    })
+    if (isCurrentUser(editingUser.value) && auth.user) {
+      auth.user = { ...auth.user, username: updated.username }
+      localStorage.setItem('helpdesk_user', JSON.stringify(auth.user))
+    }
+    showToast('User updated successfully', 'success')
+    editingUser.value = null
+  } catch (err: any) {
+    const msg = err?.message || 'Failed to update user'
+    editError.value = msg
+    showToast(msg, 'error')
+  } finally {
+    editSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -148,7 +196,20 @@ async function onRoleChange(user: User, event: Event) {
               <div class="joined-date">{{ formatJoined(u.createdAt) }}</div>
             </div>
           </div>
-          <RoleBadge :role="u.role" />
+          <div class="user-top-right">
+            <RoleBadge :role="u.role" />
+            <button
+              type="button"
+              class="btn-icon"
+              title="Edit user"
+              @click="openEditModal(u)"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="user-card-bottom">
@@ -165,6 +226,55 @@ async function onRoleChange(user: User, event: Event) {
             <option value="ADMIN">Admin</option>
           </select>
         </div>
+      </div>
+    </div>
+
+    <div v-if="editingUser" class="modal-backdrop" @click.self="closeEditModal">
+      <div class="card modal-card" role="dialog" aria-modal="true">
+        <h3 class="modal-title">Edit User</h3>
+
+        <div v-if="editError" class="alert-error">{{ editError }}</div>
+
+        <form @submit.prevent="handleSaveEdit" novalidate>
+          <div class="form-group">
+            <label for="edit-user-name" class="form-label">Username</label>
+            <input
+              id="edit-user-name"
+              v-model="editUsername"
+              type="text"
+              class="form-input"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-user-role" class="form-label">Role</label>
+            <select
+              id="edit-user-role"
+              v-model="editRole"
+              class="form-select"
+              :disabled="isCurrentUser(editingUser)"
+            >
+              <option value="CLIENT">Client</option>
+              <option value="TECHNICIAN">Technician</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+          </div>
+
+          <div class="modal-actions">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              :disabled="editSaving"
+              @click="closeEditModal"
+            >
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary" :disabled="editSaving">
+              {{ editSaving ? 'Saving...' : 'Save' }}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -194,6 +304,12 @@ async function onRoleChange(user: User, event: Event) {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+}
+
+.user-top-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .user-identity {
@@ -252,6 +368,46 @@ async function onRoleChange(user: User, event: Event) {
   text-transform: uppercase;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.modal-card {
+  max-width: 440px;
+  width: 100%;
+  padding: 1.5rem;
+}
+
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.alert-error {
+  padding: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--danger-light);
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+  margin-top: 0.5rem;
+}
+
 .skeleton-user-top {
   height: 44px;
   width: 100%;
@@ -279,4 +435,3 @@ async function onRoleChange(user: User, event: Event) {
   }
 }
 </style>
-

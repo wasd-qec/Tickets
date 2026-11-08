@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getUsersApi, updateUserRoleApi } from '@/api/users'
+import { getUsersApi, updateUserApi, updateUserRoleApi } from '@/api/users'
 import type { Role, User } from '@/types'
 
 export const useUsersStore = defineStore('users', () => {
@@ -39,11 +39,21 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
+  async function updateUser(id: string | number, payload: { username: string; role: Role }) {
+    const updated = await updateUserApi(id, payload)
+    const idx = users.value.findIndex((u) => String(u.id) === String(id))
+    if (idx !== -1 && users.value[idx]) {
+      users.value[idx] = { ...users.value[idx]!, ...updated }
+    }
+    return updated
+  }
+
   return {
     users,
     loading,
     fetchUsers,
     updateRole,
+    updateUser,
   }
 })
 

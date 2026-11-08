@@ -84,6 +84,7 @@ export const useTicketsStore = defineStore('tickets', () => {
     payload: {
       status?: TicketStatus
       priority?: TicketPriority
+      categoryId?: string | number
       assignedToId?: string | number | null
     },
   ) {

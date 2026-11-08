@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { useTicketsStore } from '@/stores/tickets'
+import { useCategoriesStore } from '@/stores/categories'
+import { useUsersStore } from '@/stores/users'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -12,6 +14,8 @@ import type { Comment, TicketPriority, TicketStatus } from '@/types'
 
 const route = useRoute()
 const ticketsStore = useTicketsStore()
+const categoriesStore = useCategoriesStore()
+const usersStore = useUsersStore()
 const auth = useAuthStore()
 const { showToast } = useToast()
 
@@ -36,6 +40,7 @@ const isStaff = computed(
   () => auth.user?.role === 'TECHNICIAN' || auth.user?.role === 'ADMIN',
 )
 const isAdmin = computed(() => auth.user?.role === 'ADMIN')
+const isTechnician = computed(() => auth.user?.role === 'TECHNICIAN')
 const isClient = computed(() => auth.user?.role === 'CLIENT')
 
 const isOwnTicket = computed(() => {
@@ -50,6 +55,40 @@ const isOwnTicket = computed(() => {
     ticket.value.authorUsername
   return authorName ? authorName === auth.user.username : true
 })
+
+const currentAssigneeId = computed(() => {
+  if (!ticket.value) return null
+  return (
+    ticket.value.assignedToId ??
+    ticket.value.assignedTo?.id ??
+    ticket.value.assignedTechnician?.id ??
+    null
+  )
+})
+
+const isAssignedToCurrentUser = computed(() => {
+  if (!auth.user || currentAssigneeId.value === null || currentAssigneeId.value === undefined) {
+    return false
+  }
+  return String(currentAssigneeId.value) === String(auth.user.id)
+})
+
+const canTechnicianComment = computed(() => {
+  if (!isTechnician.value) return true
+  return isAssignedToCurrentUser.value
+})
+
+const canModifyStaffControls = computed(() => {
+  if (isAdmin.value) return true
+  if (isTechnician.value) {
+    return isUnassigned.value || isAssignedToCurrentUser.value
+  }
+  return false
+})
+
+const assignableStaff = computed(() =>
+  usersStore.users.filter((u) => u.role === 'TECHNICIAN' || u.role === 'ADMIN'),
+)
 
 const isArchived = computed(
   () => ticket.value?.status === 'CLOSED' || ticket.value?.status === 'CANCELLED',
@@ -93,6 +132,12 @@ async function loadData() {
 
 onMounted(() => {
   loadData()
+  if (isStaff.value) {
+    categoriesStore.fetchCategories().catch(() => {})
+  }
+  if (isAdmin.value) {
+    usersStore.fetchUsers().catch(() => {})
+  }
 })
 
 async function refreshAll() {
@@ -110,6 +155,42 @@ async function handleClaimTicket() {
     showToast('Ticket claimed', 'success')
   } catch (err: any) {
     showToast(err?.message || 'Failed to claim ticket', 'error')
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleReassignChange(event: Event) {
+  if (!ticket.value) return
+  const target = event.target as HTMLSelectElement
+  const rawVal = target.value
+  const assignedToId = rawVal === '' ? null : isNaN(Number(rawVal)) ? rawVal : Number(rawVal)
+  actionLoading.value = true
+  try {
+    await ticketsStore.updateTicket(ticket.value.id, { assignedToId })
+    await refreshAll()
+    showToast(assignedToId ? 'Ticket reassigned' : 'Ticket unassigned', 'success')
+  } catch (err: any) {
+    showToast(err?.message || 'Failed to reassign ticket', 'error')
+    await refreshAll()
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function handleCategoryChange(event: Event) {
+  if (!ticket.value) return
+  const target = event.target as HTMLSelectElement
+  const rawVal = target.value
+  const categoryId = isNaN(Number(rawVal)) ? rawVal : Number(rawVal)
+  actionLoading.value = true
+  try {
+    await ticketsStore.updateTicket(ticket.value.id, { categoryId })
+    await refreshAll()
+    showToast('Category updated', 'success')
+  } catch (err: any) {
+    showToast(err?.message || 'Failed to update category', 'error')
+    await refreshAll()
   } finally {
     actionLoading.value = false
   }
@@ -181,6 +262,10 @@ async function handleConfirmClose() {
 
 async function handlePostComment() {
   if (!ticket.value || !newComment.value.trim()) return
+  if (!canTechnicianComment.value) {
+    showToast('Only the assigned technician can comment on this ticket.', 'error')
+    return
+  }
   commentSubmitting.value = true
   try {
     await ticketsStore.addComment(ticket.value.id, newComment.value.trim())
@@ -370,6 +455,15 @@ function formatDateTime(iso?: string): string {
             This ticket is archived and locked.
           </div>
 
+          <div v-else-if="!canTechnicianComment" class="locked-banner">
+            <template v-if="isUnassigned">
+              Claim this ticket to post comments and work on it.
+            </template>
+            <template v-else>
+              This ticket is assigned to {{ assignedName }}. Other technicians have view-only access.
+            </template>
+          </div>
+
           <form v-else class="comment-form" @submit.prevent="handlePostComment">
             <textarea
               v-model="newComment"
@@ -403,13 +497,52 @@ function formatDateTime(iso?: string): string {
           Claim Ticket
         </button>
 
+        <div v-if="isAdmin" class="form-group">
+          <label for="staff-assignee" class="form-label">Assigned Technician</label>
+          <select
+            id="staff-assignee"
+            class="form-select"
+            :value="currentAssigneeId ?? ''"
+            :disabled="actionLoading"
+            @change="handleReassignChange"
+          >
+            <option value="">Unassigned</option>
+            <option
+              v-for="staffUser in assignableStaff"
+              :key="staffUser.id"
+              :value="staffUser.id"
+            >
+              {{ staffUser.username }} ({{ staffUser.role === 'ADMIN' ? 'Admin' : 'Technician' }})
+            </option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="staff-category" class="form-label">Category</label>
+          <select
+            id="staff-category"
+            class="form-select"
+            :value="ticket.categoryId ?? ticket.category?.id ?? ''"
+            :disabled="actionLoading || !canModifyStaffControls"
+            @change="handleCategoryChange"
+          >
+            <option
+              v-for="cat in categoriesStore.categories"
+              :key="cat.id"
+              :value="cat.id"
+            >
+              {{ cat.name }}
+            </option>
+          </select>
+        </div>
+
         <div class="form-group">
           <label for="staff-priority" class="form-label">Priority</label>
           <select
             id="staff-priority"
             class="form-select"
             :value="ticket.priority"
-            :disabled="actionLoading"
+            :disabled="actionLoading || !canModifyStaffControls"
             @change="handlePriorityChange"
           >
             <option value="LOW">Low</option>
@@ -424,7 +557,7 @@ function formatDateTime(iso?: string): string {
             id="staff-status"
             class="form-select"
             :value="['OPEN', 'IN_PROGRESS', 'RESOLVED'].includes(ticket.status) ? ticket.status : 'RESOLVED'"
-            :disabled="actionLoading || isArchived"
+            :disabled="actionLoading || isArchived || !canModifyStaffControls"
             @change="handleStatusChange"
           >
             <option value="OPEN">Open</option>
@@ -434,7 +567,7 @@ function formatDateTime(iso?: string): string {
         </div>
 
         <button
-          v-if="ticket.status === 'RESOLVED'"
+          v-if="ticket.status === 'RESOLVED' && canModifyStaffControls"
           type="button"
           class="btn btn-secondary full-btn"
           :disabled="actionLoading"
@@ -743,4 +876,3 @@ function formatDateTime(iso?: string): string {
   }
 }
 </style>
-

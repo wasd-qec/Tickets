@@ -56,6 +56,12 @@ const router = createRouter({
       meta: { roles: ['TECHNICIAN', 'ADMIN'], title: 'Ticket Queue' },
     },
     {
+      path: '/my-claims',
+      name: 'claimed-tickets',
+      component: () => import('@/views/ClaimedTicketsView.vue'),
+      meta: { roles: ['TECHNICIAN'], title: 'My Claimed Tickets' },
+    },
+    {
       path: '/categories',
       name: 'categories',
       component: () => import('@/views/CategoriesView.vue'),

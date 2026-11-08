@@ -291,17 +291,17 @@ function goToTicket(id: string | number) {
               <td class="col-assigned">
                 <span
                   v-if="getAssigneeName(ticket)"
-                  class="avatar"
+                  class="assignee-text"
                   :title="`Assigned to ${getAssigneeName(ticket)}`"
                 >
-                  {{ getInitials(getAssigneeName(ticket)!) }}
+                  {{ getAssigneeName(ticket) }}
                 </span>
                 <span
                   v-else
-                  class="avatar avatar-unassigned"
+                  class="assignee-unassigned"
                   title="Unassigned"
                 >
-                  —
+                  Unassigned
                 </span>
               </td>
               <td class="col-updated">
@@ -505,11 +505,11 @@ function goToTicket(id: string | number) {
 }
 
 .col-assigned {
-  width: 110px;
+  width: 140px;
 }
 
 .col-updated {
-  width: 110px;
+  width: 100px;
 }
 
 .title-line1 {
@@ -541,6 +541,22 @@ function goToTicket(id: string | number) {
 .updated-time {
   color: var(--text-muted);
   font-size: 0.825rem;
+  white-space: nowrap;
+}
+
+.assignee-text {
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.assignee-unassigned {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.85rem;
   white-space: nowrap;
 }
 

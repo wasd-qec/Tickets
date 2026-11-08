@@ -24,7 +24,10 @@ const navItems = computed(() => {
     ]
   }
   if (role === 'TECHNICIAN') {
-    return [{ label: 'Ticket Queue', to: '/queue' }]
+    return [
+      { label: 'Ticket Queue', to: '/queue' },
+      { label: 'My Tickets', to: '/my-claims' },
+    ]
   }
   if (role === 'ADMIN') {
     return [

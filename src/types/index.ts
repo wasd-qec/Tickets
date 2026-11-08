@@ -70,6 +70,7 @@ export interface TicketQueryParams {
   status?: string
   priority?: string
   categoryId?: string | number
+  assignedToId?: string | number
   mine?: boolean
 }
 
