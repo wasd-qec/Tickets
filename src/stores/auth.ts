@@ -7,7 +7,12 @@ export const useAuthStore = defineStore('auth', () => {
     const currentUser = ref<User | null>(null)
     // 2. Computed: login status & landing destination based on role
     const isLoggedIn = computed(() => currentUser.value !== null)
-    const homeRoute = computed(() => '/queue')
+    const homeRoute = computed(() => {
+        if (currentUser.value?.role === 'TECHNICIAN' || currentUser.value?.role === 'ADMIN') {
+            return '/queue'
+        }
+        return '/tickets'
+    })
 
     // 3. Actions: mutate state
     function setUser(user: User) { currentUser.value = user }

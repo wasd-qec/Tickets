@@ -3,7 +3,8 @@ import type { Category } from './Categories'
 export type Stage = 'Opened' | 'In Progress' | 'Resolved' | 'Closed' | 'Cancelled'
 export type Priority = 'Low' | 'Medium' | 'High'
 export interface Tickets {
-    Name: String
+    Name: string
+    Description?: string
     TicketID: number
     CreateAt: string
     CreateBy: number

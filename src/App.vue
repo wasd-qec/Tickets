@@ -3,11 +3,11 @@ import { computed } from 'vue'
 import { useRoute, RouterView } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/AppLayout.vue'
+import PopUp from '@/components/PopUp.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
 
-// If the page is not public and the user is logged in, show the AppLayout frame
 const showLayout = computed(() => !route.meta.public && auth.isLoggedIn)
 </script>
 
@@ -16,4 +16,25 @@ const showLayout = computed(() => !route.meta.public && auth.isLoggedIn)
     <RouterView />
   </AppLayout>
   <RouterView v-else />
+  <PopUp />
 </template>
+
+<style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #f8fafc;
+  color: #0f172a;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+</style>
