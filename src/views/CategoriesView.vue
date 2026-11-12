@@ -1,183 +1,252 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { mockCategories, mockTickets } from '@/Data/MockData'
-import type { Category } from '@/Data/Categories'
+import { ref, computed, onMounted } from 'vue'
 import { useToast } from '@/composables/useToast'
+import { api } from '@/services/api'
+import type { Category } from '@/Data/Categories'
+import type { Tickets } from '@/Data/Ticket'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const { showToast } = useToast()
 
-const showModal = ref(false)
-const isEditing = ref(false)
-const currentId = ref<number | null>(null)
-const name = ref('')
-const description = ref('')
+const categories = ref<Category[]>([])
+const tickets = ref<Tickets[]>([])
+const isLoading = ref(true)
+const errorMessage = ref('')
+
+const isModalOpen = ref(false)
+const modalMode = ref<'create' | 'edit'>('create')
+const editingCategoryId = ref<number | null>(null)
+const formName = ref('')
 const formError = ref('')
+const isSaving = ref(false)
 
-const categoryToDelete = ref<Category | null>(null)
+const showDeleteConfirm = ref(false)
+const deletingCategory = ref<Category | null>(null)
 
-function getActiveCount(categoryId: number) {
-  return mockTickets.filter(
-    (t) => t.CategoryID === categoryId && t.Stage !== 'Closed' && t.Stage !== 'Cancelled',
-  ).length
+async function fetchData() {
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    const [cData, tData] = await Promise.all([
+      api.getCategories(),
+      api.getTickets(),
+    ])
+    categories.value = cData
+    tickets.value = tData
+  } catch {
+    errorMessage.value = 'Failed to load categories. Please ensure mock API server is running.'
+  } finally {
+    isLoading.value = false
+  }
 }
 
-function openAddModal() {
-  isEditing.value = false
-  currentId.value = null
-  name.value = ''
-  description.value = ''
+onMounted(() => {
+  fetchData()
+})
+
+function getUsageCount(catId: number) {
+  return tickets.value.filter((t) => t.CategoryID === catId).length
+}
+
+function openCreateModal() {
+  modalMode.value = 'create'
+  editingCategoryId.value = null
+  formName.value = ''
   formError.value = ''
-  showModal.value = true
+  isModalOpen.value = true
 }
 
 function openEditModal(cat: Category) {
-  isEditing.value = true
-  currentId.value = cat.CategroyID
-  name.value = String(cat.name)
-  description.value = String(cat.Description || '')
+  modalMode.value = 'edit'
+  editingCategoryId.value = cat.CategroyID
+  formName.value = String(cat.name)
   formError.value = ''
-  showModal.value = true
+  isModalOpen.value = true
 }
 
-function handleSave() {
+function closeModal() {
+  isModalOpen.value = false
+  formName.value = ''
   formError.value = ''
-  if (!name.value.trim()) {
-    formError.value = 'Category name is required.'
+}
+
+async function handleSaveCategory() {
+  const trimmed = formName.value.trim()
+  if (!trimmed) {
+    formError.value = 'Category name cannot be empty.'
     return
   }
 
-  if (isEditing.value && currentId.value) {
-    const found = mockCategories.find((c) => c.CategroyID === currentId.value)
-    if (found) {
-      found.name = name.value.trim()
-      found.Description = description.value.trim()
-      showToast('Category updated successfully', 'success')
+  const duplicate = categories.value.some(
+    (c) =>
+      c.name.toLowerCase() === trimmed.toLowerCase() &&
+      c.CategroyID !== editingCategoryId.value,
+  )
+  if (duplicate) {
+    formError.value = 'A category with this name already exists.'
+    return
+  }
+
+  isSaving.value = true
+  try {
+    if (modalMode.value === 'create') {
+      const nextId =
+        categories.value.length > 0
+          ? Math.max(...categories.value.map((c) => c.CategroyID)) + 1
+          : 1
+      const created = await api.createCategory({
+        CategroyID: nextId,
+        name: trimmed,
+        Description: '',
+      })
+      categories.value.push(created)
+      showToast('Category created', 'success')
+    } else if (modalMode.value === 'edit' && editingCategoryId.value !== null) {
+      const targetCat = categories.value.find((c) => c.CategroyID === editingCategoryId.value)
+      if (targetCat) {
+        const targetId = (targetCat as any).id || targetCat.CategroyID
+        await api.updateCategory(targetId, { name: trimmed })
+        targetCat.name = trimmed
+        showToast('Category updated', 'success')
+      }
     }
-  } else {
-    const newId = Date.now()
-    mockCategories.push({
-      CategroyID: newId,
-      name: name.value.trim(),
-      Description: description.value.trim(),
-    })
-    showToast('Category added successfully', 'success')
+    closeModal()
+  } catch {
+    showToast('Failed to save category', 'error')
+  } finally {
+    isSaving.value = false
   }
-
-  showModal.value = false
 }
 
-function openDeleteModal(cat: Category) {
-  if (getActiveCount(cat.CategroyID) > 0) return
-  categoryToDelete.value = cat
+function confirmDelete(cat: Category) {
+  const usage = getUsageCount(cat.CategroyID)
+  if (usage > 0) {
+    showToast(`Cannot delete category: currently used by ${usage} ticket(s)`, 'error')
+    return
+  }
+  deletingCategory.value = cat
+  showDeleteConfirm.value = true
 }
 
-function handleConfirmDelete() {
-  if (!categoryToDelete.value) return
-  const idx = mockCategories.findIndex((c) => c.CategroyID === categoryToDelete.value?.CategroyID)
-  if (idx !== -1) {
-    mockCategories.splice(idx, 1)
+async function handleDelete() {
+  if (!deletingCategory.value) return
+  const cat = deletingCategory.value
+  showDeleteConfirm.value = false
+
+  try {
+    const targetId = (cat as any).id || cat.CategroyID
+    await api.deleteCategory(targetId)
+    categories.value = categories.value.filter((c) => c.CategroyID !== cat.CategroyID)
     showToast('Category deleted', 'success')
+  } catch {
+    showToast('Failed to delete category', 'error')
+  } finally {
+    deletingCategory.value = null
   }
-  categoryToDelete.value = null
 }
 </script>
 
 <template>
   <div class="categories-page">
     <div class="page-header">
-      <h1 class="page-title">Categories</h1>
-      <button type="button" class="btn btn-primary" @click="openAddModal">+ Add Category</button>
+      <div>
+        <h1 class="page-title">Categories Management</h1>
+        <p class="page-subtitle">Configure ticket issue categories</p>
+      </div>
+
+      <button type="button" class="btn-create" @click="openCreateModal">
+        + Add Category
+      </button>
     </div>
 
-    <div v-if="mockCategories.length === 0" class="empty-card">
-      <p class="empty-title">No categories yet</p>
-      <p class="empty-subtitle">Create support categories to organize tickets.</p>
-      <button type="button" class="btn btn-primary" @click="openAddModal">+ Add Category</button>
+    <div v-if="isLoading" class="state-card">
+      <div class="spinner"></div>
+      <p class="state-text">Loading categories...</p>
     </div>
 
-    <div v-else class="cards-grid">
-      <div v-for="cat in mockCategories" :key="cat.CategroyID" class="category-card">
-        <div class="card-head">
-          <div class="category-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-            </svg>
-          </div>
-          <div class="card-actions">
-            <button type="button" class="icon-btn" title="Edit" @click="openEditModal(cat)">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </button>
-            <span
-              :title="
-                getActiveCount(cat.CategroyID) > 0
-                  ? 'Cannot delete a category with active tickets'
-                  : 'Delete category'
-              "
-            >
+    <div v-else-if="errorMessage" class="state-card error-card">
+      <p class="error-text">{{ errorMessage }}</p>
+      <button type="button" class="btn-primary" @click="fetchData">Retry</button>
+    </div>
+
+    <div v-else-if="categories.length === 0" class="empty-card">
+      <p class="empty-title">No categories found</p>
+      <p class="empty-subtitle">Add your first category to help users organize their support tickets.</p>
+      <button type="button" class="btn-primary" @click="openCreateModal">Add Category</button>
+    </div>
+
+    <div v-else class="table-card">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-name">Name</th>
+            <th class="col-usage">Tickets Using</th>
+            <th class="col-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="cat in categories" :key="cat.CategroyID">
+            <td class="col-id">#{{ cat.CategroyID }}</td>
+            <td class="col-name font-semibold">{{ cat.name }}</td>
+            <td class="col-usage">
+              <span class="usage-badge" :class="{ 'zero-usage': getUsageCount(cat.CategroyID) === 0 }">
+                {{ getUsageCount(cat.CategroyID) }} ticket(s)
+              </span>
+            </td>
+            <td class="col-actions">
+              <button type="button" class="btn-action edit" @click="openEditModal(cat)">Edit</button>
               <button
                 type="button"
-                class="icon-btn"
-                :disabled="getActiveCount(cat.CategroyID) > 0"
-                @click="openDeleteModal(cat)"
+                class="btn-action delete"
+                :disabled="getUsageCount(cat.CategroyID) > 0"
+                :title="getUsageCount(cat.CategroyID) > 0 ? 'Cannot delete category with associated tickets' : 'Delete category'"
+                @click="confirmDelete(cat)"
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" />
-                </svg>
+                Delete
               </button>
-            </span>
-          </div>
-        </div>
-
-        <h3 class="category-name">{{ cat.name }}</h3>
-        <p class="category-desc">{{ cat.Description || 'No description provided.' }}</p>
-
-        <div class="card-foot">
-          <span class="count-chip">{{ getActiveCount(cat.CategroyID) }} active tickets</span>
-        </div>
-      </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <div v-if="showModal" class="modal-backdrop" @click.self="showModal = false">
-      <div class="modal-box">
-        <h2 class="modal-title">{{ isEditing ? 'Edit Category' : 'Add Category' }}</h2>
-        <div v-if="formError" class="error-banner">{{ formError }}</div>
+    <div v-if="isModalOpen" class="modal-backdrop">
+      <div class="modal-card">
+        <h3 class="modal-title">{{ modalMode === 'create' ? 'Add New Category' : 'Edit Category' }}</h3>
 
-        <form class="modal-form" @submit.prevent="handleSave">
+        <form @submit.prevent="handleSaveCategory">
           <div class="form-group">
-            <label for="cat-name">Name</label>
-            <input id="cat-name" v-model="name" type="text" placeholder="e.g. Hardware" required />
-          </div>
-
-          <div class="form-group">
-            <label for="cat-desc">Description</label>
-            <textarea
-              id="cat-desc"
-              v-model="description"
-              rows="3"
-              placeholder="Short description of this category..."
-            ></textarea>
+            <label for="cat-name">Category Name</label>
+            <input
+              id="cat-name"
+              v-model="formName"
+              type="text"
+              placeholder="e.g. Email, Hardware, Software"
+              required
+              autofocus
+            />
+            <span v-if="formError" class="field-error">{{ formError }}</span>
           </div>
 
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="showModal = false">Cancel</button>
-            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="button" class="btn-secondary" @click="closeModal">Cancel</button>
+            <button type="submit" class="btn-primary" :disabled="isSaving">
+              {{ isSaving ? 'Saving...' : 'Save Category' }}
+            </button>
           </div>
         </form>
       </div>
     </div>
 
     <ConfirmModal
-      :open="Boolean(categoryToDelete)"
+      :open="showDeleteConfirm"
       title="Delete Category"
-      :message="`Are you sure you want to delete category &quot;${categoryToDelete?.name}&quot;?`"
-      confirm-label="Delete"
-      :danger="true"
-      @confirm="handleConfirmDelete"
-      @cancel="categoryToDelete = null"
+      :message="`Are you sure you want to delete the category '${deletingCategory?.name}'?`"
+      confirm-text="Yes, Delete"
+      confirm-type="danger"
+      @confirm="handleDelete"
+      @cancel="showDeleteConfirm = false"
     />
   </div>
 </template>
@@ -193,204 +262,287 @@ function handleConfirmDelete() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .page-title {
   font-size: 1.5rem;
   font-weight: 700;
   color: #0f172a;
+  margin: 0;
 }
 
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
+.page-subtitle {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0 0;
 }
 
-.category-card {
+.btn-create {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-create:hover {
+  background: #1d4ed8;
+}
+
+.state-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 1.25rem;
+  border-radius: 10px;
+  padding: 3rem 1.5rem;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
 }
 
-.card-head {
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.state-text {
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.error-card {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.error-text {
+  color: #b91c1c;
+  font-size: 0.95rem;
+}
+
+.empty-card {
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 3rem 1.5rem;
+  text-align: center;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.empty-title {
+  font-weight: 600;
+  color: #334155;
+  font-size: 1rem;
+}
+
+.empty-subtitle {
+  color: #64748b;
+  font-size: 0.875rem;
   margin-bottom: 0.75rem;
 }
 
-.category-icon {
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 8px;
-  background-color: #dbeafe;
-  color: #1d4ed8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.table-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
-.card-actions {
-  display: flex;
-  gap: 0.25rem;
-}
-
-.icon-btn {
-  background: transparent;
-  border: none;
-  padding: 0.35rem;
-  border-radius: 6px;
-  color: #64748b;
-  cursor: pointer;
-}
-
-.icon-btn:hover:not(:disabled) {
-  background-color: #f1f5f9;
-  color: #0f172a;
-}
-
-.icon-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.category-name {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #0f172a;
-  margin-bottom: 0.35rem;
-}
-
-.category-desc {
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 0.875rem;
-  color: #64748b;
-  flex: 1;
-  margin-bottom: 1rem;
+  text-align: left;
 }
 
-.count-chip {
-  background-color: #f1f5f9;
+.data-table th {
+  background: #f8fafc;
   color: #475569;
-  font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.25rem 0.6rem;
-  border-radius: 9999px;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.data-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.col-id {
+  width: 80px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.usage-badge {
+  background: #f1f5f9;
+  color: #334155;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.zero-usage {
+  color: #94a3b8;
+}
+
+.col-actions {
+  width: 160px;
+  text-align: right;
+}
+
+.btn-action {
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+}
+
+.btn-action.edit {
+  color: #2563eb;
+}
+
+.btn-action.edit:hover {
+  text-decoration: underline;
+}
+
+.btn-action.delete {
+  color: #dc2626;
+}
+
+.btn-action.delete:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.btn-action.delete:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
 }
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.45);
+  background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 50;
   padding: 1rem;
-  z-index: 1000;
 }
 
-.modal-box {
+.modal-card {
   background: #ffffff;
   border-radius: 12px;
-  max-width: 440px;
   width: 100%;
+  max-width: 440px;
   padding: 1.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
 .modal-title {
   font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-}
-
-.error-banner {
-  background-color: #fee2e2;
-  color: #b91c1c;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  margin-bottom: 1rem;
-}
-
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 1.25rem 0;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 .form-group label {
-  font-size: 0.875rem;
+  font-size: 0.85rem;
   font-weight: 600;
+  color: #334155;
 }
 
-.form-group input,
-.form-group textarea {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
+.form-group input {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: inherit;
+  font-size: 0.9rem;
   outline: none;
 }
 
-.form-group input:focus,
-.form-group textarea:focus {
+.form-group input:focus {
   border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.field-error {
+  color: #dc2626;
+  font-size: 0.75rem;
 }
 
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
-  margin-top: 0.5rem;
+  margin-top: 1.5rem;
 }
 
-.btn {
-  padding: 0.5rem 1rem;
+.btn-secondary {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: #f8fafc;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 0.55rem 1.1rem;
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  border: 1px solid transparent;
 }
 
-.btn-primary {
-  background-color: #2563eb;
-  color: #ffffff;
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
 }
 
-.btn-secondary {
-  background-color: #ffffff;
-  border-color: #e2e8f0;
-  color: #0f172a;
-}
-
-.empty-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 3rem;
-  text-align: center;
-}
-
-@media (max-width: 900px) {
-  .cards-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 600px) {
-  .cards-grid {
-    grid-template-columns: 1fr;
-  }
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

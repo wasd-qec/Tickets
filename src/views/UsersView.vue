@@ -1,198 +1,258 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { mockUsers } from '@/Data/MockData'
-import type { User, Role } from '@/Data/User'
+import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { api } from '@/services/api'
+import type { Role, User } from '@/Data/User'
 import RoleBadge from '@/components/RoleBadge.vue'
+import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const auth = useAuthStore()
 const { showToast } = useToast()
 
-const search = ref('')
-const selectedRole = ref<'All' | Role>('All')
-const roles: ('All' | Role)[] = ['All', 'CLIENT', 'TECHNICIAN', 'ADMIN']
+const users = ref<User[]>([])
+const isLoading = ref(true)
+const errorMessage = ref('')
 
-const showEditModal = ref(false)
-const userToEdit = ref<User | null>(null)
-const editUsername = ref('')
-const editRole = ref<Role>('CLIENT')
+const isModalOpen = ref(false)
+const modalMode = ref<'create' | 'edit'>('create')
+const editingUserId = ref<number | null>(null)
+const formUsername = ref('')
+const formRole = ref<Role>('CLIENT')
 const formError = ref('')
+const isSaving = ref(false)
 
-const filteredUsers = computed(() => {
-  return mockUsers.filter((u) => {
-    if (selectedRole.value !== 'All' && u.role !== selectedRole.value) {
-      return false
-    }
-    if (search.value.trim()) {
-      const q = search.value.trim().toLowerCase()
-      if (!u.username.toLowerCase().includes(q)) return false
-    }
-    return true
-  })
+const showDeleteConfirm = ref(false)
+const deletingUser = ref<User | null>(null)
+
+async function fetchUsers() {
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    users.value = await api.getUsers()
+  } catch {
+    errorMessage.value = 'Failed to load users. Please ensure mock API server is running.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  fetchUsers()
 })
 
-function getInitials(name: string) {
-  return name.slice(0, 2).toUpperCase()
-}
-
-function formatDate(iso?: string) {
-  if (!iso) return 'Joined recently'
-  return `Joined ${new Date(iso).toLocaleDateString()}`
-}
-
-function isCurrentUser(u: User) {
-  return auth.currentUser?.id === u.id
-}
-
-function handleRoleChange(user: User, event: Event) {
-  const target = event.target as HTMLSelectElement
-  const newRole = target.value as Role
-  user.role = newRole
-  showToast(`Role updated to ${newRole}`, 'success')
-}
-
-function openEditModal(u: User) {
-  userToEdit.value = u
-  editUsername.value = u.username
-  editRole.value = u.role
+function openCreateModal() {
+  modalMode.value = 'create'
+  editingUserId.value = null
+  formUsername.value = ''
+  formRole.value = 'CLIENT'
   formError.value = ''
-  showEditModal.value = true
+  isModalOpen.value = true
 }
 
-function handleSaveEdit() {
-  if (!userToEdit.value) return
+function openEditModal(user: User) {
+  modalMode.value = 'edit'
+  editingUserId.value = user.id
+  formUsername.value = user.username
+  formRole.value = user.role
   formError.value = ''
+  isModalOpen.value = true
+}
 
-  const trimmed = editUsername.value.trim()
-  if (trimmed.length < 3) {
-    formError.value = 'Username must be at least 3 characters.'
+function closeModal() {
+  isModalOpen.value = false
+  formUsername.value = ''
+  formError.value = ''
+}
+
+async function handleSaveUser() {
+  const trimmed = formUsername.value.trim()
+  if (trimmed.length < 3 || !/^[a-zA-Z0-9_]+$/.test(trimmed)) {
+    formError.value = 'Username must be alphanumeric and at least 3 characters.'
     return
   }
 
-  const duplicate = mockUsers.some(
-    (u) => u.id !== userToEdit.value?.id && u.username.toLowerCase() === trimmed.toLowerCase(),
+  const duplicate = users.value.some(
+    (u) =>
+      u.username.toLowerCase() === trimmed.toLowerCase() &&
+      u.id !== editingUserId.value,
   )
   if (duplicate) {
-    formError.value = 'Username is already taken.'
+    formError.value = 'A user with this username already exists.'
     return
   }
 
-  userToEdit.value.username = trimmed
-  if (!isCurrentUser(userToEdit.value)) {
-    userToEdit.value.role = editRole.value
-  }
+  isSaving.value = true
+  try {
+    if (modalMode.value === 'create') {
+      const newUser = await api.createUser({
+        username: trimmed,
+        role: formRole.value,
+      })
+      users.value.push(newUser)
+      showToast('User created', 'success')
+    } else if (modalMode.value === 'edit' && editingUserId.value !== null) {
+      const targetUser = users.value.find((u) => u.id === editingUserId.value)
+      if (targetUser) {
+        await api.updateUser(targetUser.id, {
+          username: trimmed,
+          role: formRole.value,
+        })
+        targetUser.username = trimmed
+        targetUser.role = formRole.value
 
-  showToast('User updated successfully', 'success')
-  showEditModal.value = false
+        if (auth.currentUser?.id === targetUser.id) {
+          auth.setUser({ ...auth.currentUser, username: trimmed, role: formRole.value })
+        }
+        showToast('User updated', 'success')
+      }
+    }
+    closeModal()
+  } catch {
+    showToast('Failed to save user', 'error')
+  } finally {
+    isSaving.value = false
+  }
+}
+
+function confirmDelete(user: User) {
+  if (user.id === auth.currentUser?.id) {
+    showToast('Cannot delete your own account while logged in.', 'error')
+    return
+  }
+  deletingUser.value = user
+  showDeleteConfirm.value = true
+}
+
+async function handleDelete() {
+  if (!deletingUser.value) return
+  const user = deletingUser.value
+  showDeleteConfirm.value = false
+
+  try {
+    await api.deleteUser(user.id)
+    users.value = users.value.filter((u) => u.id !== user.id)
+    showToast('User deleted', 'success')
+  } catch {
+    showToast('Failed to delete user', 'error')
+  } finally {
+    deletingUser.value = null
+  }
 }
 </script>
 
 <template>
   <div class="users-page">
     <div class="page-header">
-      <h1 class="page-title">Users</h1>
-      <div class="search-box">
-        <input
-          v-model="search"
-          type="search"
-          placeholder="Search by username..."
-          class="form-input"
-        />
+      <div>
+        <h1 class="page-title">Users Management</h1>
+        <p class="page-subtitle">Manage accounts, credentials, and access roles</p>
       </div>
-    </div>
 
-    <div class="tabs">
-      <button
-        v-for="r in roles"
-        :key="r"
-        type="button"
-        class="tab-btn"
-        :class="{ active: selectedRole === r }"
-        @click="selectedRole = r"
-      >
-        {{ r }}
+      <button type="button" class="btn-create" @click="openCreateModal">
+        + Add User
       </button>
     </div>
 
-    <div v-if="filteredUsers.length === 0" class="empty-card">
+    <div v-if="isLoading" class="state-card">
+      <div class="spinner"></div>
+      <p class="state-text">Loading users...</p>
+    </div>
+
+    <div v-else-if="errorMessage" class="state-card error-card">
+      <p class="error-text">{{ errorMessage }}</p>
+      <button type="button" class="btn-primary" @click="fetchUsers">Retry</button>
+    </div>
+
+    <div v-else-if="users.length === 0" class="empty-card">
       <p class="empty-title">No users found</p>
-      <p class="empty-subtitle">Try adjusting your search query or role filter.</p>
+      <p class="empty-subtitle">Add users to grant access to the ticketing system.</p>
+      <button type="button" class="btn-primary" @click="openCreateModal">Add User</button>
     </div>
 
-    <div v-else class="cards-grid">
-      <div v-for="u in filteredUsers" :key="u.id" class="user-card">
-        <div class="user-top">
-          <div class="user-info">
-            <div class="avatar">{{ getInitials(u.username) }}</div>
-            <div>
-              <div class="name-row">
-                <span class="username">{{ u.username }}</span>
-                <span v-if="isCurrentUser(u)" class="you-badge">You</span>
-              </div>
-              <span class="joined-date">{{ formatDate(u.createdAt) }}</span>
-            </div>
-          </div>
-          <div class="top-actions">
-            <RoleBadge :role="u.role" />
-            <button type="button" class="icon-btn" title="Edit user" @click="openEditModal(u)">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="role-selector">
-          <label :for="`role-${u.id}`">Role</label>
-          <select
-            :id="`role-${u.id}`"
-            :value="u.role"
-            :disabled="isCurrentUser(u)"
-            class="form-select"
-            @change="handleRoleChange(u, $event)"
-          >
-            <option value="CLIENT">Client</option>
-            <option value="TECHNICIAN">Technician</option>
-            <option value="ADMIN">Admin</option>
-          </select>
-        </div>
-      </div>
+    <div v-else class="table-card">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-user">Username</th>
+            <th class="col-role">Role</th>
+            <th class="col-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="user in users" :key="user.id">
+            <td class="col-id">#{{ user.id }}</td>
+            <td class="col-user">
+              <span class="font-semibold">{{ user.username }}</span>
+              <span v-if="user.id === auth.currentUser?.id" class="self-tag">(You)</span>
+            </td>
+            <td class="col-role">
+              <RoleBadge :role="user.role" />
+            </td>
+            <td class="col-actions">
+              <button type="button" class="btn-action edit" @click="openEditModal(user)">Edit</button>
+              <button
+                type="button"
+                class="btn-action delete"
+                :disabled="user.id === auth.currentUser?.id"
+                :title="user.id === auth.currentUser?.id ? 'Cannot delete your own account' : 'Delete user'"
+                @click="confirmDelete(user)"
+              >
+                Delete
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <div v-if="showEditModal" class="modal-backdrop" @click.self="showEditModal = false">
-      <div class="modal-box">
-        <h2 class="modal-title">Edit User</h2>
-        <div v-if="formError" class="error-banner">{{ formError }}</div>
+    <div v-if="isModalOpen" class="modal-backdrop">
+      <div class="modal-card">
+        <h3 class="modal-title">{{ modalMode === 'create' ? 'Add New User' : 'Edit User' }}</h3>
 
-        <form class="modal-form" @submit.prevent="handleSaveEdit">
+        <form @submit.prevent="handleSaveUser">
           <div class="form-group">
-            <label for="edit-name">Username</label>
-            <input id="edit-name" v-model="editUsername" type="text" required />
+            <label for="u-name">Username</label>
+            <input
+              id="u-name"
+              v-model="formUsername"
+              type="text"
+              placeholder="e.g. john_doe"
+              required
+              autofocus
+            />
+            <span v-if="formError" class="field-error">{{ formError }}</span>
           </div>
 
-          <div class="form-group">
-            <label for="edit-role">Role</label>
-            <select
-              id="edit-role"
-              v-model="editRole"
-              :disabled="userToEdit ? isCurrentUser(userToEdit) : false"
-              class="form-select"
-            >
-              <option value="CLIENT">Client</option>
-              <option value="TECHNICIAN">Technician</option>
-              <option value="ADMIN">Admin</option>
+          <div class="form-group mt-3">
+            <label for="u-role">Role</label>
+            <select id="u-role" v-model="formRole" class="form-select">
+              <option value="CLIENT">CLIENT</option>
+              <option value="TECHNICIAN">TECHNICIAN</option>
+              <option value="ADMIN">ADMIN</option>
             </select>
           </div>
 
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="showEditModal = false">Cancel</button>
-            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <button type="button" class="btn-secondary" @click="closeModal">Cancel</button>
+            <button type="submit" class="btn-primary" :disabled="isSaving">
+              {{ isSaving ? 'Saving...' : 'Save User' }}
+            </button>
           </div>
         </form>
       </div>
     </div>
+
+    <ConfirmModal
+      :open="showDeleteConfirm"
+      title="Delete User"
+      :message="`Are you sure you want to delete user '${deletingUser?.username}'?`"
+      confirm-text="Yes, Delete"
+      confirm-type="danger"
+      @confirm="handleDelete"
+      @cancel="showDeleteConfirm = false"
+    />
   </div>
 </template>
 
@@ -215,266 +275,290 @@ function handleSaveEdit() {
   font-size: 1.5rem;
   font-weight: 700;
   color: #0f172a;
+  margin: 0;
 }
 
-.search-box {
-  width: 260px;
-}
-
-.form-input {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: inherit;
-  outline: none;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.5rem;
-  border-bottom: 1px solid #e2e8f0;
-  overflow-x: auto;
-}
-
-.tab-btn {
-  background: transparent;
-  border: none;
-  padding: 0.5rem 0.85rem;
-  font-size: 0.875rem;
-  font-weight: 500;
+.page-subtitle {
   color: #64748b;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  white-space: nowrap;
+  font-size: 0.875rem;
+  margin: 0.25rem 0 0 0;
 }
 
-.tab-btn.active {
-  color: #2563eb;
+.btn-create {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  border-bottom-color: #2563eb;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
+.btn-create:hover {
+  background: #1d4ed8;
 }
 
-.user-card {
+.state-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 1.25rem;
+  border-radius: 10px;
+  padding: 3rem 1.5rem;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 1.25rem;
-}
-
-.user-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.user-info {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.avatar {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 9999px;
-  background-color: #dbeafe;
-  color: #1d4ed8;
-  font-weight: 700;
-  font-size: 0.875rem;
-  display: flex;
   align-items: center;
   justify-content: center;
+  gap: 1rem;
 }
 
-.name-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
-.username {
-  font-weight: 600;
-  color: #0f172a;
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.you-badge {
-  background-color: #eff6ff;
-  color: #2563eb;
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.1rem 0.4rem;
-  border-radius: 9999px;
-}
-
-.joined-date {
-  font-size: 0.75rem;
+.state-text {
   color: #64748b;
+  font-size: 0.95rem;
 }
 
-.top-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
+.error-card {
+  border-color: #fecaca;
+  background: #fef2f2;
 }
 
-.icon-btn {
-  background: transparent;
-  border: none;
-  padding: 0.35rem;
-  border-radius: 6px;
-  color: #64748b;
-  cursor: pointer;
+.error-text {
+  color: #b91c1c;
+  font-size: 0.95rem;
 }
 
-.icon-btn:hover {
-  background-color: #f1f5f9;
-  color: #0f172a;
-}
-
-.role-selector {
+.empty-card {
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 3rem 1.5rem;
+  text-align: center;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #e2e8f0;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-.role-selector label {
+.empty-title {
+  font-weight: 600;
+  color: #334155;
+  font-size: 1rem;
+}
+
+.empty-subtitle {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.table-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.data-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 600;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.data-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+.col-id {
+  width: 80px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.col-user {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.font-semibold {
+  font-weight: 600;
+}
+
+.self-tag {
+  color: #2563eb;
   font-size: 0.75rem;
   font-weight: 600;
-  color: #64748b;
-  text-transform: uppercase;
 }
 
-.form-select {
-  padding: 0.45rem 0.65rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: inherit;
+.col-role {
+  width: 150px;
+}
+
+.col-actions {
+  width: 160px;
+  text-align: right;
+}
+
+.btn-action {
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0.3rem 0.5rem;
+}
+
+.btn-action.edit {
+  color: #2563eb;
+}
+
+.btn-action.edit:hover {
+  text-decoration: underline;
+}
+
+.btn-action.delete {
+  color: #dc2626;
+}
+
+.btn-action.delete:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.btn-action.delete:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
 }
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.45);
+  background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 50;
   padding: 1rem;
-  z-index: 1000;
 }
 
-.modal-box {
+.modal-card {
   background: #ffffff;
   border-radius: 12px;
-  max-width: 440px;
   width: 100%;
+  max-width: 440px;
   padding: 1.5rem;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
 .modal-title {
   font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-}
-
-.error-banner {
-  background-color: #fee2e2;
-  color: #b91c1c;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  margin-bottom: 1rem;
-}
-
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 1.25rem 0;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
+}
+
+.mt-3 {
+  margin-top: 0.85rem;
 }
 
 .form-group label {
-  font-size: 0.875rem;
+  font-size: 0.85rem;
   font-weight: 600;
+  color: #334155;
 }
 
-.form-group input {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
+.form-group input,
+.form-select {
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: inherit;
+  font-size: 0.9rem;
   outline: none;
+  background: #ffffff;
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-select:focus {
   border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.field-error {
+  color: #dc2626;
+  font-size: 0.75rem;
 }
 
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.75rem;
-  margin-top: 0.5rem;
+  margin-top: 1.5rem;
 }
 
-.btn {
-  padding: 0.5rem 1rem;
+.btn-secondary {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-secondary:hover {
+  background: #f8fafc;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 0.55rem 1.1rem;
   border-radius: 6px;
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  border: 1px solid transparent;
 }
 
-.btn-primary {
-  background-color: #2563eb;
-  color: #ffffff;
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
 }
 
-.btn-secondary {
-  background-color: #ffffff;
-  border-color: #e2e8f0;
-  color: #0f172a;
-}
-
-.empty-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 3rem;
-  text-align: center;
-}
-
-@media (max-width: 900px) {
-  .cards-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 600px) {
-  .cards-grid {
-    grid-template-columns: 1fr;
-  }
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>

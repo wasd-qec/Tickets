@@ -3,11 +3,11 @@ import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { mockUsers } from '@/Data/MockData'
 
 const username = ref('')
 const password = ref('')
 const errorMessage = ref('')
+const isLoading = ref(false)
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
@@ -15,25 +15,27 @@ const { showToast } = useToast()
 
 const registeredSuccess = computed(() => route.query.registered === '1')
 
-function handleLogin() {
+async function handleLogin() {
   errorMessage.value = ''
   if (!username.value.trim() || !password.value) {
     errorMessage.value = 'Please enter both username and password.'
     return
   }
 
-  const trimmed = username.value.trim().toLowerCase()
-  const foundUser = mockUsers.find((u) => u.username.toLowerCase() === trimmed)
+  isLoading.value = true
+  try {
+    const foundUser = await auth.login(username.value)
+    if (!foundUser) {
+      errorMessage.value = 'User not found. Try: alice_client, charlie_tech, or admin_user.'
+      showToast('Invalid username or password', 'error')
+      return
+    }
 
-  if (!foundUser) {
-    errorMessage.value = 'User not found. Try: alice_client, charlie_tech, or admin_user.'
-    showToast('Invalid username or password', 'error')
-    return
+    showToast(`Welcome back, ${foundUser.username}!`, 'success')
+    router.push(auth.homeRoute)
+  } finally {
+    isLoading.value = false
   }
-
-  auth.setUser(foundUser)
-  showToast(`Welcome back, ${foundUser.username}!`, 'success')
-  router.push(auth.homeRoute)
 }
 </script>
 
@@ -80,7 +82,9 @@ function handleLogin() {
           />
         </div>
 
-        <button type="submit" class="btn-submit">Log in</button>
+        <button type="submit" class="btn-submit" :disabled="isLoading">
+          {{ isLoading ? 'Logging in...' : 'Log in' }}
+        </button>
       </form>
 
       <p class="auth-footer">

@@ -1,479 +1,518 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { mockTickets, mockCategories, mockComments, mockUsers } from '@/Data/MockData'
-import type { Priority, Stage } from '@/Data/Ticket'
+import { api } from '@/services/api'
+import type { Priority, Stage, Tickets } from '@/Data/Ticket'
+import type { Category } from '@/Data/Categories'
 import type { Comment } from '@/Data/Comment'
+import type { User } from '@/Data/User'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PriorityBadge from '@/components/PriorityBadge.vue'
-import RoleBadge from '@/components/RoleBadge.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const { showToast } = useToast()
 
 const ticketId = computed(() => Number(route.params.id))
-const ticket = computed(() => mockTickets.find((t) => t.TicketID === ticketId.value))
 
-const backPath = computed(() => (auth.currentUser?.role === 'CLIENT' ? '/tickets' : '/queue'))
-const backLabel = computed(() =>
-  auth.currentUser?.role === 'CLIENT' ? '← Back to My Tickets' : '← Back to Queue',
-)
+const ticket = ref<Tickets | null>(null)
+const comments = ref<Comment[]>([])
+const categories = ref<Category[]>([])
+const users = ref<User[]>([])
+const isLoading = ref(true)
+const errorMessage = ref('')
+const isForbidden = ref(false)
 
-const isStaff = computed(
-  () => auth.currentUser?.role === 'TECHNICIAN' || auth.currentUser?.role === 'ADMIN',
-)
-const isAdmin = computed(() => auth.currentUser?.role === 'ADMIN')
-const isTechnician = computed(() => auth.currentUser?.role === 'TECHNICIAN')
-const isClient = computed(() => auth.currentUser?.role === 'CLIENT')
+const newCommentText = ref('')
+const isSubmittingComment = ref(false)
+const showCloseConfirm = ref(false)
 
-const isOwner = computed(() => ticket.value?.CreateBy === auth.currentUser?.id)
-const isAssignedToCurrent = computed(() => ticket.value?.Assignto === auth.currentUser?.id)
+async function fetchTicketData() {
+  isLoading.value = true
+  errorMessage.value = ''
+  isForbidden.value = false
 
-const isForbiddenClient = computed(() => isClient.value && Boolean(ticket.value) && !isOwner.value)
+  try {
+    const id = ticketId.value
+    const [tData, cData, catData, uData] = await Promise.all([
+      api.getTicketById(id),
+      api.getCommentsByTicket(id),
+      api.getCategories(),
+      api.getUsers(),
+    ])
 
-const canTechnicianComment = computed(() => {
-  if (!isTechnician.value) return true
-  return isAssignedToCurrent.value
+    if (auth.currentUser?.role === 'CLIENT' && tData.CreateBy !== auth.currentUser.id) {
+      isForbidden.value = true
+      isLoading.value = false
+      return
+    }
+
+    ticket.value = tData
+    comments.value = cData
+    categories.value = catData
+    users.value = uData
+  } catch {
+    errorMessage.value = 'Failed to load ticket details or ticket not found.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  fetchTicketData()
 })
 
-const canModifyStaffControls = computed(() => {
+const author = computed(() => users.value.find((u) => u.id === ticket.value?.CreateBy))
+const assignee = computed(() => users.value.find((u) => u.id === ticket.value?.Assignto))
+const category = computed(() => categories.value.find((c) => c.CategroyID === ticket.value?.CategoryID))
+const techUsers = computed(() => users.value.filter((u) => u.role === 'TECHNICIAN' || u.role === 'ADMIN'))
+
+const isClient = computed(() => auth.currentUser?.role === 'CLIENT')
+const isTech = computed(() => auth.currentUser?.role === 'TECHNICIAN')
+const isAdmin = computed(() => auth.currentUser?.role === 'ADMIN')
+
+const isAssignedTech = computed(() => {
+  if (!ticket.value || !auth.currentUser) return false
+  return ticket.value.Assignto === auth.currentUser.id
+})
+
+const isOtherTech = computed(() => {
+  if (!ticket.value || !isTech.value) return false
+  return ticket.value.Assignto !== undefined && ticket.value.Assignto !== auth.currentUser?.id
+})
+
+const canStaffAct = computed(() => {
   if (isAdmin.value) return true
-  if (isTechnician.value) {
-    return !ticket.value?.Assignto || isAssignedToCurrent.value
-  }
+  if (isTech.value && (ticket.value?.Assignto === undefined || isAssignedTech.value)) return true
   return false
 })
 
-const isArchived = computed(
-  () => ticket.value?.Stage === 'Closed' || ticket.value?.Stage === 'Cancelled',
-)
+const canPostComment = computed(() => {
+  if (ticket.value?.Stage === 'Closed' || ticket.value?.Stage === 'Cancelled') return false
+  if (isAdmin.value) return true
+  if (isClient.value && ticket.value?.CreateBy === auth.currentUser?.id) return true
+  if (isTech.value && isAssignedTech.value) return true
+  return false
+})
 
-const ticketComments = computed(() =>
-  mockComments.filter((c) => c.TicketID === ticketId.value),
-)
-
-const newCommentText = ref('')
-const showCancelModal = ref(false)
-const showCloseModal = ref(false)
-const commentToDelete = ref<Comment | null>(null)
-
-function getCategoryName(categoryId: number) {
-  const found = mockCategories.find((c) => c.CategroyID === categoryId)
-  return found ? String(found.name) : 'General'
-}
-
-function getUser(userId: number) {
-  return mockUsers.find((u) => u.id === userId)
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString()
-}
-
-function getInitials(name: string) {
-  return name.slice(0, 2).toUpperCase()
-}
-
-function handleClaim() {
+async function handleClaim() {
   if (!ticket.value || !auth.currentUser) return
-  ticket.value.Assignto = auth.currentUser.id
-  ticket.value.UpdatedAt = new Date().toISOString()
+  const now = new Date().toISOString()
+  try {
+    const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
+      Assignto: auth.currentUser.id,
+      Stage: ticket.value.Stage === 'Opened' ? 'In Progress' : ticket.value.Stage,
+      UpdatedAt: now,
+    })
+    ticket.value = updated
 
-  mockComments.push({
-    CommentID: Date.now(),
-    TicketID: ticket.value.TicketID,
-    AuthorID: auth.currentUser.id,
-    SystemMessage: true,
-    Message: `Ticket claimed by ${auth.currentUser.username}`,
-    creatAt: new Date().toISOString(),
-  })
-
-  showToast('Ticket claimed successfully', 'success')
+    const sysComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: true,
+      Message: `Ticket claimed by ${auth.currentUser.username}.`,
+      creatAt: now,
+    })
+    comments.value.push(sysComment)
+    showToast('Ticket claimed successfully', 'success')
+  } catch {
+    showToast('Failed to claim ticket', 'error')
+  }
 }
 
-function handleReassign(event: Event) {
-  if (!ticket.value) return
+async function handleAssigneeChange(event: Event) {
+  if (!ticket.value || !auth.currentUser) return
   const target = event.target as HTMLSelectElement
   const newAssigneeId = target.value ? Number(target.value) : undefined
-  ticket.value.Assignto = newAssigneeId
-  ticket.value.UpdatedAt = new Date().toISOString()
+  const now = new Date().toISOString()
+  const assignedUser = users.value.find((u) => u.id === newAssigneeId)
 
-  const assigneeUser = newAssigneeId ? getUser(newAssigneeId) : null
-  mockComments.push({
-    CommentID: Date.now(),
-    TicketID: ticket.value.TicketID,
-    AuthorID: auth.currentUser?.id || 1,
-    SystemMessage: true,
-    Message: assigneeUser
-      ? `Ticket assigned to ${assigneeUser.username}`
-      : 'Ticket unassigned',
-    creatAt: new Date().toISOString(),
-  })
+  try {
+    const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
+      Assignto: newAssigneeId,
+      UpdatedAt: now,
+    })
+    ticket.value = updated
 
-  showToast(assigneeUser ? 'Ticket reassigned' : 'Ticket unassigned', 'success')
+    const msg = assignedUser
+      ? `Ticket assigned to ${assignedUser.username} by ${auth.currentUser.username}.`
+      : `Ticket unassigned by ${auth.currentUser.username}.`
+    const sysComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: true,
+      Message: msg,
+      creatAt: now,
+    })
+    comments.value.push(sysComment)
+    showToast('Assignee updated', 'success')
+  } catch {
+    showToast('Failed to update assignee', 'error')
+  }
 }
 
-function handleCategoryChange(event: Event) {
-  if (!ticket.value) return
+async function handleCategoryChange(event: Event) {
+  if (!ticket.value || !auth.currentUser) return
   const target = event.target as HTMLSelectElement
   const newCatId = Number(target.value)
-  ticket.value.CategoryID = newCatId
-  ticket.value.UpdatedAt = new Date().toISOString()
+  const catObj = categories.value.find((c) => c.CategroyID === newCatId)
+  const now = new Date().toISOString()
 
-  const catName = getCategoryName(newCatId)
-  mockComments.push({
-    CommentID: Date.now(),
-    TicketID: ticket.value.TicketID,
-    AuthorID: auth.currentUser?.id || 1,
-    SystemMessage: true,
-    Message: `Category changed to ${catName}`,
-    creatAt: new Date().toISOString(),
-  })
+  try {
+    const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
+      CategoryID: newCatId,
+      UpdatedAt: now,
+    })
+    ticket.value = updated
 
-  showToast('Category updated', 'success')
+    const sysComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: true,
+      Message: `Category changed to ${catObj?.name || 'General'}.`,
+      creatAt: now,
+    })
+    comments.value.push(sysComment)
+    showToast('Category updated', 'success')
+  } catch {
+    showToast('Failed to update category', 'error')
+  }
 }
 
-function handlePriorityChange(event: Event) {
-  if (!ticket.value) return
+async function handlePriorityChange(event: Event) {
+  if (!ticket.value || !auth.currentUser) return
   const target = event.target as HTMLSelectElement
   const newPriority = target.value as Priority
-  ticket.value.Priority = newPriority
-  ticket.value.UpdatedAt = new Date().toISOString()
-  showToast(`Priority updated to ${newPriority}`, 'success')
+  const now = new Date().toISOString()
+
+  try {
+    const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
+      Priority: newPriority,
+      UpdatedAt: now,
+    })
+    ticket.value = updated
+
+    const sysComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: true,
+      Message: `Priority changed to ${newPriority}.`,
+      creatAt: now,
+    })
+    comments.value.push(sysComment)
+    showToast('Priority updated', 'success')
+  } catch {
+    showToast('Failed to update priority', 'error')
+  }
 }
 
-function handleStatusChange(event: Event) {
-  if (!ticket.value) return
+async function handleStatusChange(event: Event) {
+  if (!ticket.value || !auth.currentUser) return
   const target = event.target as HTMLSelectElement
   const newStage = target.value as Stage
-  const prevStage = ticket.value.Stage
-  ticket.value.Stage = newStage
-  ticket.value.UpdatedAt = new Date().toISOString()
+  const now = new Date().toISOString()
 
-  mockComments.push({
-    CommentID: Date.now(),
-    TicketID: ticket.value.TicketID,
-    AuthorID: auth.currentUser?.id || 1,
-    SystemMessage: true,
-    Message: `Status changed from ${prevStage} to ${newStage}`,
-    creatAt: new Date().toISOString(),
-  })
+  try {
+    const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
+      Stage: newStage,
+      UpdatedAt: now,
+    })
+    ticket.value = updated
 
-  showToast(`Status updated to ${newStage}`, 'success')
-}
-
-function handleConfirmCancel() {
-  if (!ticket.value) return
-  ticket.value.Stage = 'Cancelled'
-  ticket.value.UpdatedAt = new Date().toISOString()
-  showToast('Ticket cancelled', 'success')
-  showCancelModal.value = false
-}
-
-function handleConfirmClose() {
-  if (!ticket.value) return
-  ticket.value.Stage = 'Closed'
-  ticket.value.UpdatedAt = new Date().toISOString()
-  showToast('Ticket closed and archived', 'success')
-  showCloseModal.value = false
-}
-
-function handlePostComment() {
-  if (!ticket.value || !newCommentText.value.trim() || !auth.currentUser) return
-  mockComments.push({
-    CommentID: Date.now(),
-    TicketID: ticket.value.TicketID,
-    AuthorID: auth.currentUser.id,
-    SystemMessage: false,
-    Message: newCommentText.value.trim(),
-    creatAt: new Date().toISOString(),
-  })
-  newCommentText.value = ''
-  showToast('Comment posted', 'success')
-}
-
-function handleDeleteComment() {
-  if (!commentToDelete.value) return
-  const idx = mockComments.findIndex((c) => c.CommentID === commentToDelete.value?.CommentID)
-  if (idx !== -1) {
-    mockComments.splice(idx, 1)
-    showToast('Comment deleted', 'success')
+    const sysComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: true,
+      Message: `Status changed to ${newStage}.`,
+      creatAt: now,
+    })
+    comments.value.push(sysComment)
+    showToast('Status updated', 'success')
+  } catch {
+    showToast('Failed to update status', 'error')
   }
-  commentToDelete.value = null
+}
+
+async function confirmCloseTicket() {
+  if (!ticket.value || !auth.currentUser) return
+  showCloseConfirm.value = false
+  const now = new Date().toISOString()
+
+  try {
+    const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
+      Stage: 'Closed',
+      UpdatedAt: now,
+    })
+    ticket.value = updated
+
+    const sysComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: true,
+      Message: `Ticket closed by ${auth.currentUser.username}.`,
+      creatAt: now,
+    })
+    comments.value.push(sysComment)
+    showToast('Ticket marked as Closed', 'success')
+  } catch {
+    showToast('Failed to close ticket', 'error')
+  }
+}
+
+async function handleAddComment() {
+  if (!ticket.value || !auth.currentUser || !newCommentText.value.trim()) return
+  isSubmittingComment.value = true
+  const now = new Date().toISOString()
+
+  try {
+    const newComment = await api.addComment({
+      TicketID: ticket.value.TicketID,
+      CreateBy: auth.currentUser.id,
+      SystemMessage: false,
+      Message: newCommentText.value.trim(),
+      creatAt: now,
+    })
+    comments.value.push(newComment)
+    await api.updateTicket(ticket.value.id || ticket.value.TicketID, { UpdatedAt: now })
+    ticket.value.UpdatedAt = now
+    newCommentText.value = ''
+    showToast('Comment posted', 'success')
+  } catch {
+    showToast('Failed to post comment', 'error')
+  } finally {
+    isSubmittingComment.value = false
+  }
+}
+
+function getCommentAuthor(id: number) {
+  return users.value.find((u) => u.id === id)
+}
+
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 </script>
 
 <template>
-  <div v-if="isForbiddenClient" class="empty-card forbidden-card">
-    <h2>403 — Access Denied</h2>
-    <p>You do not have permission to view another client's ticket.</p>
-    <RouterLink :to="backPath" class="btn btn-primary">Return to My Tickets</RouterLink>
-  </div>
-
-  <div v-else-if="!ticket" class="empty-card">
-    <h2>Ticket not found</h2>
-    <p>The ticket you requested does not exist.</p>
-    <RouterLink :to="backPath" class="btn btn-primary">Return</RouterLink>
-  </div>
-
-  <div v-else class="detail-page">
-    <div class="back-row">
-      <RouterLink :to="backPath" class="back-link">{{ backLabel }}</RouterLink>
+  <div class="detail-page">
+    <div v-if="isLoading" class="state-card">
+      <div class="spinner"></div>
+      <p class="state-text">Loading ticket details...</p>
     </div>
 
-    <div class="detail-layout" :class="{ 'has-sidebar': isStaff }">
+    <div v-else-if="isForbidden" class="error-page">
+      <div class="error-icon">403</div>
+      <h2 class="error-title">Access Denied</h2>
+      <p class="error-desc">You do not have permission to view tickets submitted by other users.</p>
+      <button type="button" class="btn-primary" @click="router.push('/tickets')">
+        Back to My Tickets
+      </button>
+    </div>
+
+    <div v-else-if="errorMessage || !ticket" class="error-page">
+      <div class="error-icon">404</div>
+      <h2 class="error-title">Ticket Not Found</h2>
+      <p class="error-desc">{{ errorMessage || 'The requested ticket could not be found.' }}</p>
+      <button type="button" class="btn-primary" @click="fetchTicketData">Retry</button>
+    </div>
+
+    <div v-else class="detail-container">
       <div class="detail-main">
-        <div class="card header-card">
+        <button type="button" class="btn-back" @click="router.back()">&larr; Back</button>
+
+        <div v-if="isOtherTech" class="view-only-banner">
+          This ticket is claimed by <strong>{{ assignee?.username }}</strong>. You are in view-only mode.
+        </div>
+
+        <div class="ticket-header-card">
           <div class="header-top">
-            <div>
-              <span class="ticket-id">#{{ ticket.TicketID }}</span>
-              <h1 class="ticket-title">{{ ticket.Name }}</h1>
-            </div>
-            <div class="badges">
-              <StatusBadge :Stage="ticket.Stage" />
+            <span class="ticket-id-tag">#{{ ticket.TicketID }}</span>
+            <div class="header-badges">
               <PriorityBadge :priority="ticket.Priority" />
+              <StatusBadge :Stage="ticket.Stage" />
             </div>
           </div>
 
-          <div class="metadata-grid">
-            <div class="meta-item">
-              <span class="meta-label">Category</span>
-              <span class="meta-val">{{ getCategoryName(ticket.CategoryID) }}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">Author</span>
-              <span class="meta-val">
-                {{ getUser(ticket.CreateBy)?.username || `User #${ticket.CreateBy}` }}
-              </span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">Assigned Technician</span>
-              <span class="meta-val">
-                {{
-                  ticket.Assignto
-                    ? getUser(ticket.Assignto)?.username || `User #${ticket.Assignto}`
-                    : 'Unassigned'
-                }}
-              </span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">Created</span>
-              <span class="meta-val">{{ formatDate(ticket.CreateAt) }}</span>
-            </div>
-            <div class="meta-item">
-              <span class="meta-label">Updated</span>
-              <span class="meta-val">{{ formatDate(ticket.UpdatedAt) }}</span>
-            </div>
+          <h1 class="ticket-title">{{ ticket.Name }}</h1>
+
+          <div class="header-meta">
+            <span>Opened by <strong>{{ author?.username || `User #${ticket.CreateBy}` }}</strong></span>
+            <span>&middot;</span>
+            <span>{{ formatDateTime(ticket.CreateAt) }}</span>
+            <span>&middot;</span>
+            <span>Category: <strong>{{ category?.name || 'General' }}</strong></span>
           </div>
 
-          <div v-if="ticket.Description" class="ticket-description">
-            <span class="meta-label">Description</span>
-            <p class="description-body">{{ ticket.Description }}</p>
-          </div>
-
-          <div v-if="isClient && isOwner" class="client-actions">
-            <button
-              v-if="ticket.Stage === 'Opened'"
-              type="button"
-              class="btn btn-danger-outline"
-              @click="showCancelModal = true"
-            >
-              Cancel Ticket
-            </button>
-            <button
-              v-if="ticket.Stage === 'Resolved'"
-              type="button"
-              class="btn btn-primary"
-              @click="showCloseModal = true"
-            >
-              Close Ticket
-            </button>
+          <div class="ticket-desc-box">
+            <h3 class="desc-heading">Description</h3>
+            <p v-if="ticket.Description" class="desc-content">{{ ticket.Description }}</p>
+            <p v-else class="desc-empty">No additional description provided.</p>
           </div>
         </div>
 
-        <div class="card timeline-card">
-          <h2 class="timeline-title">Discussion Timeline</h2>
+        <div class="timeline-card">
+          <h2 class="timeline-title">Activity & Discussion</h2>
 
-          <div v-if="ticketComments.length === 0" class="no-comments">
+          <div v-if="comments.length === 0" class="no-comments">
             No activity or comments recorded yet.
           </div>
 
           <div v-else class="comments-list">
-            <template v-for="c in ticketComments" :key="c.CommentID">
-              <div v-if="c.SystemMessage" class="system-event">
-                <span class="system-icon">&bull;</span>
-                <span class="system-text">{{ c.Message }}</span>
-                <span class="system-time">&middot; {{ formatDate(c.creatAt) }}</span>
+            <div
+              v-for="cmt in comments"
+              :key="cmt.CommentID || cmt.id"
+              class="comment-item"
+              :class="{ 'system-comment': cmt.SystemMessage }"
+            >
+              <div v-if="cmt.SystemMessage" class="sys-msg-body">
+                <span class="sys-bullet">&bull;</span>
+                <span class="sys-text">{{ cmt.Message }}</span>
+                <span class="sys-time">{{ formatDateTime(cmt.creatAt) }}</span>
               </div>
 
-              <div v-else class="comment-item">
-                <div class="comment-avatar">
-                  {{ getInitials(getUser(c.AuthorID)?.username || 'User') }}
+              <div v-else class="user-msg-body">
+                <div class="msg-header">
+                  <span class="msg-author">{{ getCommentAuthor(cmt.CreateBy)?.username || 'User' }}</span>
+                  <span class="msg-role">{{ getCommentAuthor(cmt.CreateBy)?.role }}</span>
+                  <span class="msg-time">{{ formatDateTime(cmt.creatAt) }}</span>
                 </div>
-                <div class="comment-content">
-                  <div class="comment-head">
-                    <div class="author-meta">
-                      <span class="author-name">{{ getUser(c.AuthorID)?.username || 'User' }}</span>
-                      <RoleBadge v-if="getUser(c.AuthorID)" :role="getUser(c.AuthorID)!.role" />
-                      <span class="comment-time">{{ formatDate(c.creatAt) }}</span>
-                    </div>
-                    <button
-                      v-if="isAdmin"
-                      type="button"
-                      class="btn-delete"
-                      title="Delete comment"
-                      @click="commentToDelete = c"
-                    >
-                      &times;
-                    </button>
-                  </div>
-                  <p class="comment-body">{{ c.Message }}</p>
-                </div>
+                <div class="msg-content">{{ cmt.Message }}</div>
               </div>
-            </template>
+            </div>
           </div>
 
-          <div v-if="isArchived" class="locked-banner">
-            This ticket is archived and locked.
-          </div>
-
-          <div v-else-if="!canTechnicianComment" class="locked-banner">
-            <template v-if="!ticket.Assignto">
-              Claim this ticket to post comments and work on it.
-            </template>
-            <template v-else>
-              This ticket is assigned to
-              {{ getUser(ticket.Assignto)?.username || 'another technician' }}. Other technicians
-              have view-only access.
-            </template>
-          </div>
-
-          <form v-else class="comment-form" @submit.prevent="handlePostComment">
+          <div v-if="canPostComment" class="comment-box">
             <textarea
               v-model="newCommentText"
               rows="3"
-              placeholder="Write a comment..."
-              required
+              placeholder="Leave a comment or update..."
+              class="comment-textarea"
             ></textarea>
-            <div class="form-bottom">
-              <button type="submit" class="btn btn-primary" :disabled="!newCommentText.trim()">
-                Post comment
+            <div class="comment-actions">
+              <button
+                type="button"
+                class="btn-post-comment"
+                :disabled="!newCommentText.trim() || isSubmittingComment"
+                @click="handleAddComment"
+              >
+                {{ isSubmittingComment ? 'Posting...' : 'Post Comment' }}
               </button>
             </div>
-          </form>
+          </div>
         </div>
       </div>
 
-      <aside v-if="isStaff" class="card staff-sidebar">
-        <h2 class="staff-title">Staff Actions</h2>
+      <div class="detail-sidebar">
+        <div class="sidebar-card">
+          <h3 class="sidebar-title">Ticket Information</h3>
 
-        <button
-          v-if="!ticket.Assignto"
-          type="button"
-          class="btn btn-primary full-btn"
-          @click="handleClaim"
-        >
-          Claim Ticket
-        </button>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <StatusBadge :Stage="ticket.Stage" />
+          </div>
 
-        <div v-if="isAdmin" class="form-group">
-          <label>Assignee</label>
-          <select :value="ticket.Assignto || ''" class="form-select" @change="handleReassign">
-            <option value="">Unassigned</option>
-            <option
-              v-for="u in mockUsers.filter((usr) => usr.role === 'TECHNICIAN' || usr.role === 'ADMIN')"
-              :key="u.id"
-              :value="u.id"
-            >
-              {{ u.username }} ({{ u.role }})
-            </option>
-          </select>
+          <div class="info-row">
+            <span class="info-label">Priority</span>
+            <PriorityBadge :priority="ticket.Priority" />
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Category</span>
+            <span class="info-val">{{ category?.name || 'General' }}</span>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Assigned To</span>
+            <span v-if="assignee" class="info-val font-semibold">{{ assignee.username }}</span>
+            <span v-else class="info-val italic text-muted">Unassigned</span>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Created</span>
+            <span class="info-val">{{ formatDateTime(ticket.CreateAt) }}</span>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Updated</span>
+            <span class="info-val">{{ formatDateTime(ticket.UpdatedAt) }}</span>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label>Category</label>
-          <select
-            :value="ticket.CategoryID"
-            class="form-select"
-            :disabled="!canModifyStaffControls"
-            @change="handleCategoryChange"
-          >
-            <option v-for="cat in mockCategories" :key="cat.CategroyID" :value="cat.CategroyID">
-              {{ cat.name }}
-            </option>
-          </select>
-        </div>
+        <div v-if="canStaffAct" class="sidebar-card staff-card">
+          <h3 class="sidebar-title">Staff Actions</h3>
 
-        <div class="form-group">
-          <label>Priority</label>
-          <select
-            :value="ticket.Priority"
-            class="form-select"
-            :disabled="!canModifyStaffControls"
-            @change="handlePriorityChange"
-          >
-            <option value="Low">Low</option>
-            <option value="Medium">Medium</option>
-            <option value="High">High</option>
-          </select>
-        </div>
+          <div v-if="!ticket.Assignto && isTech" class="action-item">
+            <button type="button" class="btn-claim" @click="handleClaim">
+              Claim this ticket
+            </button>
+          </div>
 
-        <div class="form-group">
-          <label>Status</label>
-          <select
-            :value="['Opened', 'In Progress', 'Resolved'].includes(ticket.Stage) ? ticket.Stage : 'Resolved'"
-            class="form-select"
-            :disabled="isArchived || !canModifyStaffControls"
-            @change="handleStatusChange"
-          >
-            <option value="Opened">Opened</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Resolved">Resolved</option>
-          </select>
-        </div>
+          <div v-if="isAdmin" class="action-item">
+            <label class="action-label">Assignee</label>
+            <select :value="ticket.Assignto || ''" class="action-select" @change="handleAssigneeChange">
+              <option value="">Unassigned</option>
+              <option v-for="t in techUsers" :key="t.id" :value="t.id">
+                {{ t.username }} ({{ t.role }})
+              </option>
+            </select>
+          </div>
 
-        <button
-          v-if="ticket.Stage === 'Resolved' && canModifyStaffControls"
-          type="button"
-          class="btn btn-secondary full-btn"
-          @click="showCloseModal = true"
-        >
-          Close Ticket
-        </button>
-      </aside>
+          <div class="action-item">
+            <label class="action-label">Category</label>
+            <select :value="ticket.CategoryID" class="action-select" @change="handleCategoryChange">
+              <option v-for="c in categories" :key="c.CategroyID" :value="c.CategroyID">
+                {{ c.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="action-item">
+            <label class="action-label">Priority</label>
+            <select :value="ticket.Priority" class="action-select" @change="handlePriorityChange">
+              <option value="Low">Low</option>
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+            </select>
+          </div>
+
+          <div class="action-item">
+            <label class="action-label">Status</label>
+            <select :value="ticket.Stage" class="action-select" @change="handleStatusChange">
+              <option value="Opened">Opened</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Resolved">Resolved</option>
+              <option value="Closed">Closed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          <div v-if="ticket.Stage !== 'Closed' && ticket.Stage !== 'Cancelled'" class="action-item mt-4">
+            <button type="button" class="btn-close-ticket" @click="showCloseConfirm = true">
+              Close Ticket
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <ConfirmModal
-      :open="showCancelModal"
-      title="Cancel Ticket"
-      message="Are you sure you want to cancel this ticket?"
-      confirm-label="Cancel Ticket"
-      :danger="true"
-      @confirm="handleConfirmCancel"
-      @cancel="showCancelModal = false"
-    />
-
-    <ConfirmModal
-      :open="showCloseModal"
+      :open="showCloseConfirm"
       title="Close Ticket"
-      message="Confirm closing this resolved ticket? Once closed, it will be archived and locked."
-      confirm-label="Close Ticket"
-      @confirm="handleConfirmClose"
-      @cancel="showCloseModal = false"
-    />
-
-    <ConfirmModal
-      :open="Boolean(commentToDelete)"
-      title="Delete Comment"
-      message="Are you sure you want to delete this comment?"
-      confirm-label="Delete"
-      :danger="true"
-      @confirm="handleDeleteComment"
-      @cancel="commentToDelete = null"
+      message="Are you sure you want to close this ticket? This indicates the issue has reached its final resolved state."
+      confirm-text="Yes, Close Ticket"
+      confirm-type="danger"
+      @confirm="confirmCloseTicket"
+      @cancel="showCloseConfirm = false"
     />
   </div>
 </template>
@@ -482,29 +521,91 @@ function handleDeleteComment() {
 .detail-page {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
 }
 
-.back-link {
+.state-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 4rem 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.state-text {
   color: #64748b;
-  text-decoration: none;
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.95rem;
 }
 
-.back-link:hover {
-  color: #2563eb;
+.error-page {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 4rem 2rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.detail-layout {
+.error-icon {
+  font-size: 3rem;
+  font-weight: 800;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.error-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 0.5rem 0;
+}
+
+.error-desc {
+  color: #64748b;
+  max-width: 440px;
+  margin: 0 0 1.5rem 0;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.detail-container {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.25rem;
-  align-items: start;
+  grid-template-columns: 1fr 320px;
+  gap: 1.5rem;
 }
 
-.detail-layout.has-sidebar {
-  grid-template-columns: 1fr 280px;
+@media (max-width: 880px) {
+  .detail-container {
+    grid-template-columns: 1fr;
+  }
 }
 
 .detail-main {
@@ -513,97 +614,125 @@ function handleDeleteComment() {
   gap: 1.25rem;
 }
 
-.card {
+.btn-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-back:hover {
+  text-decoration: underline;
+}
+
+.view-only-banner {
+  background: #fef9c3;
+  border: 1px solid #fde047;
+  color: #854d0e;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.ticket-header-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 .header-top {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-  flex-wrap: wrap;
+  align-items: center;
 }
 
-.ticket-id {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.ticket-title {
-  font-size: 1.5rem;
+.ticket-id-tag {
   font-weight: 700;
-  color: #0f172a;
+  color: #64748b;
+  font-size: 0.9rem;
 }
 
-.badges {
+.header-badges {
   display: flex;
   gap: 0.5rem;
 }
 
-.metadata-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1rem;
-  padding: 1rem;
-  background-color: #f8fafc;
+.ticket-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.ticket-desc-box {
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
+  padding: 1rem;
+  margin-top: 0.5rem;
 }
 
-.meta-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.meta-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #64748b;
+.desc-heading {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #475569;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 0.5rem 0;
 }
 
-.meta-val {
+.desc-content {
+  font-size: 0.925rem;
+  color: #1e293b;
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.desc-empty {
+  color: #94a3b8;
+  font-style: italic;
+  margin: 0;
   font-size: 0.875rem;
-  font-weight: 500;
-  color: #0f172a;
 }
 
-.ticket-description {
-  margin-top: 1.25rem;
+.timeline-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-}
-
-.description-body {
-  font-size: 0.9rem;
-  color: #0f172a;
-  white-space: pre-wrap;
-}
-
-.client-actions {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
-  border-top: 1px solid #e2e8f0;
-  display: flex;
-  gap: 0.75rem;
+  gap: 1.25rem;
 }
 
 .timeline-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
 }
 
 .no-comments {
-  color: #64748b;
+  color: #94a3b8;
+  font-style: italic;
   font-size: 0.875rem;
   padding: 1rem 0;
 }
@@ -612,214 +741,225 @@ function handleDeleteComment() {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  margin-bottom: 1.5rem;
 }
 
-.system-event {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  font-size: 0.8125rem;
-  color: #64748b;
-  padding: 0.4rem;
-  background-color: #f8fafc;
-  border-radius: 6px;
+.system-comment {
+  padding: 0.4rem 0;
 }
 
-.comment-item {
-  display: flex;
-  gap: 0.75rem;
-  padding: 0.85rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-
-.comment-avatar {
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 9999px;
-  background-color: #dbeafe;
-  color: #1d4ed8;
-  font-weight: 700;
-  font-size: 0.75rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.comment-content {
-  flex: 1;
-}
-
-.comment-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.35rem;
-}
-
-.author-meta {
+.sys-msg-body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.author-name {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.comment-time {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: #64748b;
+  background: #f8fafc;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid #cbd5e1;
 }
 
-.btn-delete {
-  background: transparent;
-  border: none;
-  font-size: 1.25rem;
+.sys-bullet {
   color: #94a3b8;
-  cursor: pointer;
-  line-height: 1;
+  font-size: 1.1rem;
 }
 
-.btn-delete:hover {
-  color: #dc2626;
+.sys-time {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 0.75rem;
 }
 
-.comment-body {
-  font-size: 0.875rem;
-  color: #0f172a;
-  white-space: pre-wrap;
-}
-
-.locked-banner {
-  background-color: #f1f5f9;
+.user-msg-body {
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 0.85rem;
-  font-size: 0.875rem;
-  color: #64748b;
-  text-align: center;
+  padding: 1rem;
 }
 
-.comment-form textarea {
-  width: 100%;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: 0.875rem;
-  outline: none;
-}
-
-.comment-form textarea:focus {
-  border-color: #2563eb;
-}
-
-.form-bottom {
+.msg-header {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.msg-author {
+  font-weight: 600;
+  color: #0f172a;
+  font-size: 0.875rem;
+}
+
+.msg-role {
+  font-size: 0.7rem;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+}
+
+.msg-time {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-left: auto;
+}
+
+.msg-content {
+  font-size: 0.9rem;
+  color: #334155;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.comment-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   margin-top: 0.5rem;
 }
 
-.staff-sidebar {
+.comment-textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  outline: none;
+  resize: vertical;
+}
+
+.comment-textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.comment-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-post-comment {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.55rem 1.25rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.btn-post-comment:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.detail-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
-.staff-title {
+.sidebar-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.sidebar-title {
   font-size: 1rem;
-  font-weight: 600;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0 0 0.25rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
 }
 
-.form-group {
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.info-label {
+  color: #64748b;
+}
+
+.info-val {
+  color: #0f172a;
+}
+
+.action-item {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
-.form-group label {
-  font-size: 0.75rem;
+.action-label {
+  font-size: 0.8rem;
   font-weight: 600;
-  color: #64748b;
-  text-transform: uppercase;
+  color: #475569;
 }
 
-.form-select {
-  padding: 0.45rem 0.65rem;
-  border: 1px solid #e2e8f0;
+.action-select {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: inherit;
+  font-size: 0.85rem;
+  background: #ffffff;
 }
 
-.full-btn {
+.btn-claim {
+  background: #16a34a;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.6rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
   width: 100%;
 }
 
-.btn {
-  padding: 0.5rem 1rem;
+.btn-claim:hover {
+  background: #15803d;
+}
+
+.btn-close-ticket {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
   border-radius: 6px;
-  font-size: 0.875rem;
+  padding: 0.55rem;
   font-weight: 600;
+  font-size: 0.85rem;
   cursor: pointer;
-  border: 1px solid transparent;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
 }
 
-.btn-primary {
-  background-color: #2563eb;
-  color: #ffffff;
+.btn-close-ticket:hover {
+  background: #fee2e2;
 }
 
-.btn-primary:hover {
-  background-color: #1d4ed8;
+.mt-4 {
+  margin-top: 0.75rem;
 }
 
-.btn-secondary {
-  background-color: #ffffff;
-  border-color: #e2e8f0;
-  color: #0f172a;
+.italic {
+  font-style: italic;
 }
 
-.btn-danger-outline {
-  background-color: #ffffff;
-  border-color: #fecaca;
-  color: #dc2626;
+.text-muted {
+  color: #94a3b8;
 }
 
-.btn-danger-outline:hover {
-  background-color: #fee2e2;
-}
-
-.empty-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 3rem;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.forbidden-card h2 {
-  color: #dc2626;
-}
-
-@media (max-width: 900px) {
-  .detail-layout.has-sidebar {
-    grid-template-columns: 1fr;
-  }
+.font-semibold {
+  font-weight: 600;
 }
 </style>

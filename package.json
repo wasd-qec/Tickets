@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "build-only": "vite build",
-    "type-check": "vue-tsc --build"
+    "type-check": "vue-tsc --build",
+    "mock-api": "json-server --watch db.json --port 3000"
   },
   "dependencies": {
     "pinia": "^4.0.3",

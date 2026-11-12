@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
-import { mockUsers } from '@/Data/MockData'
+import { api } from '@/services/api'
 
 const router = useRouter()
 const { showToast } = useToast()
@@ -12,8 +12,9 @@ const password = ref('')
 const usernameError = ref('')
 const passwordError = ref('')
 const serverError = ref('')
+const isLoading = ref(false)
 
-function handleRegister() {
+async function handleRegister() {
   usernameError.value = ''
   passwordError.value = ''
   serverError.value = ''
@@ -29,24 +30,35 @@ function handleRegister() {
 
   if (usernameError.value || passwordError.value) return
 
-  const duplicate = mockUsers.some(
-    (u) => u.username.toLowerCase() === trimmed.toLowerCase(),
-  )
-  if (duplicate) {
-    serverError.value = 'Username already exists.'
-    showToast('Username already exists', 'error')
-    return
+  isLoading.value = true
+  try {
+    const users = await api.getUsers()
+    const duplicate = users.some(
+      (u) => u.username.toLowerCase() === trimmed.toLowerCase(),
+    )
+    if (duplicate) {
+      serverError.value = 'Username already exists.'
+      showToast('Username already exists', 'error')
+      return
+    }
+
+    const newUser = {
+      id: Date.now(),
+      username: trimmed,
+      role: 'CLIENT' as const,
+      createdAt: new Date().toISOString(),
+    }
+
+    await api.createUser(newUser)
+
+    showToast('Account registered successfully. Please log in.', 'success')
+    router.push({ path: '/login', query: { registered: '1' } })
+  } catch (err) {
+    serverError.value = 'Failed to create account. Please ensure mock API server is running.'
+    showToast('Registration failed', 'error')
+  } finally {
+    isLoading.value = false
   }
-
-  mockUsers.push({
-    id: Date.now(),
-    username: trimmed,
-    role: 'CLIENT',
-    createdAt: new Date().toISOString(),
-  })
-
-  showToast('Account registered successfully. Please log in.', 'success')
-  router.push({ path: '/login', query: { registered: '1' } })
 }
 </script>
 
@@ -91,7 +103,9 @@ function handleRegister() {
           <span v-if="passwordError" class="field-error">{{ passwordError }}</span>
         </div>
 
-        <button type="submit" class="btn-submit">Register</button>
+        <button type="submit" class="btn-submit" :disabled="isLoading">
+          {{ isLoading ? 'Registering...' : 'Register' }}
+        </button>
       </form>
 
       <p class="auth-footer">
@@ -118,12 +132,12 @@ function handleRegister() {
   max-width: 420px;
   width: 100%;
   padding: 2rem;
-  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 .auth-header {
   text-align: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.75rem;
 }
 
 .brand-logo {
@@ -131,44 +145,41 @@ function handleRegister() {
   align-items: center;
   gap: 0.5rem;
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   color: #0f172a;
   text-decoration: none;
   margin-bottom: 1rem;
 }
 
 .brand-icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 8px;
   background: #2563eb;
   color: #ffffff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
 }
 
 .auth-title {
-  font-size: 1.375rem;
+  font-size: 1.35rem;
   font-weight: 700;
   color: #0f172a;
-  margin-bottom: 0.25rem;
+  margin: 0 0 0.25rem 0;
 }
 
 .auth-subtitle {
   color: #64748b;
   font-size: 0.875rem;
+  margin: 0;
 }
 
 .alert-error {
-  padding: 0.75rem;
-  border-radius: 8px;
-  background-color: #fef2f2;
-  color: #dc2626;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
   font-size: 0.85rem;
-  font-weight: 500;
   margin-bottom: 1rem;
 }
 
@@ -185,51 +196,56 @@ function handleRegister() {
 }
 
 .form-group label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
 }
 
 .form-group input {
-  padding: 0.55rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
   font-size: 0.9rem;
-  font-family: inherit;
   outline: none;
 }
 
 .form-group input:focus {
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
 .field-error {
   color: #dc2626;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .btn-submit {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.65rem 1rem;
-  border: none;
-  border-radius: 8px;
-  background-color: #2563eb;
+  background: #2563eb;
   color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.7rem;
   font-weight: 600;
-  font-size: 0.9rem;
   cursor: pointer;
+  margin-top: 0.5rem;
+  transition: background 0.15s ease;
 }
 
-.btn-submit:hover {
-  background-color: #1d4ed8;
+.btn-submit:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .auth-footer {
-  margin-top: 1.25rem;
   text-align: center;
-  font-size: 0.875rem;
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-top: 1.5rem;
+  margin-bottom: 0;
 }
 
 .auth-footer a {

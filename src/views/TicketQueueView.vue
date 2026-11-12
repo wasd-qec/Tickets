@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { mockTickets, mockCategories, mockUsers } from '@/Data/MockData'
-import type { Priority, Stage } from '@/Data/Ticket'
+import { api } from '@/services/api'
+import type { Priority, Stage, Tickets } from '@/Data/Ticket'
+import type { Category } from '@/Data/Categories'
+import type { User } from '@/Data/User'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PriorityBadge from '@/components/PriorityBadge.vue'
 
 const router = useRouter()
+
+const tickets = ref<Tickets[]>([])
+const categories = ref<Category[]>([])
+const users = ref<User[]>([])
+const isLoading = ref(true)
+const errorMessage = ref('')
 
 const search = ref('')
 const activeToggle = ref<'Active' | 'Completed'>('Active')
@@ -21,6 +29,29 @@ const completedStages: Stage[] = ['Resolved', 'Closed', 'Cancelled']
 
 const availableStages = computed(() => {
   return activeToggle.value === 'Active' ? activeStages : completedStages
+})
+
+async function fetchData() {
+  isLoading.value = true
+  errorMessage.value = ''
+  try {
+    const [tData, cData, uData] = await Promise.all([
+      api.getTickets(),
+      api.getCategories(),
+      api.getUsers(),
+    ])
+    tickets.value = tData
+    categories.value = cData
+    users.value = uData
+  } catch (err) {
+    errorMessage.value = 'Failed to load tickets. Please ensure mock API server is running.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  fetchData()
 })
 
 function setToggle(toggle: 'Active' | 'Completed') {
@@ -39,7 +70,7 @@ function resetFilters() {
 }
 
 const filteredTickets = computed(() => {
-  return mockTickets.filter((t) => {
+  return tickets.value.filter((t) => {
     const inActiveGroup =
       activeToggle.value === 'Active'
         ? activeStages.includes(t.Stage)
@@ -69,18 +100,18 @@ const paginatedTickets = computed(() => {
 })
 
 function getCategoryName(categoryId: number) {
-  const found = mockCategories.find((c) => c.CategroyID === categoryId)
+  const found = categories.value.find((c) => c.CategroyID === categoryId)
   return found ? String(found.name) : 'General'
 }
 
 function getAuthorName(authorId: number) {
-  const found = mockUsers.find((u) => u.id === authorId)
+  const found = users.value.find((u) => u.id === authorId)
   return found ? found.username : `User #${authorId}`
 }
 
 function getAssigneeName(assigneeId?: number) {
   if (!assigneeId) return null
-  const found = mockUsers.find((u) => u.id === assigneeId)
+  const found = users.value.find((u) => u.id === assigneeId)
   return found ? found.username : `User #${assigneeId}`
 }
 
@@ -138,9 +169,7 @@ function goToDetail(id: number) {
       <div class="filter-controls">
         <select v-model="statusFilter" class="form-select">
           <option value="">All Statuses</option>
-          <option v-for="st in availableStages" :key="st" :value="st">
-            {{ st }}
-          </option>
+          <option v-for="st in availableStages" :key="st" :value="st">{{ st }}</option>
         </select>
 
         <select v-model="priorityFilter" class="form-select">
@@ -152,7 +181,7 @@ function goToDetail(id: number) {
 
         <select v-model="categoryFilter" class="form-select">
           <option value="">All Categories</option>
-          <option v-for="cat in mockCategories" :key="cat.CategroyID" :value="cat.CategroyID">
+          <option v-for="cat in categories" :key="cat.CategroyID" :value="cat.CategroyID">
             {{ cat.name }}
           </option>
         </select>
@@ -161,7 +190,17 @@ function goToDetail(id: number) {
       </div>
     </div>
 
-    <div v-if="paginatedTickets.length === 0" class="empty-card">
+    <div v-if="isLoading" class="state-card">
+      <div class="spinner"></div>
+      <p class="state-text">Loading tickets...</p>
+    </div>
+
+    <div v-else-if="errorMessage" class="state-card error-card">
+      <p class="error-text">{{ errorMessage }}</p>
+      <button type="button" class="btn-primary" @click="fetchData">Retry</button>
+    </div>
+
+    <div v-else-if="paginatedTickets.length === 0" class="empty-card">
       <p class="empty-title">No tickets match your filters</p>
       <p class="empty-subtitle">Try adjusting your search query or filter selections.</p>
       <button type="button" class="btn-primary" @click="resetFilters">Reset all filters</button>
@@ -258,143 +297,239 @@ function goToDetail(id: number) {
 
 .toggle-group {
   display: inline-flex;
-  background-color: #e2e8f0;
   border-radius: 8px;
-  padding: 0.25rem;
+  background: #f1f5f9;
+  padding: 3px;
+  border: 1px solid #e2e8f0;
 }
 
 .toggle-btn {
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
   border: none;
   background: transparent;
-  padding: 0.4rem 0.9rem;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 500;
   color: #64748b;
-  border-radius: 6px;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .toggle-btn.active {
   background: #ffffff;
-  color: #2563eb;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .filter-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 1rem;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 0.75rem;
-}
-
-.search-box {
-  flex: 1;
-  min-width: 200px;
-}
-
-.form-input,
-.form-select {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-family: inherit;
-  outline: none;
 }
 
 .form-input {
   width: 100%;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
 .filter-controls {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.form-select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  background: #ffffff;
+  color: #334155;
 }
 
 .btn-reset {
-  background: transparent;
+  background: none;
   border: none;
   color: #2563eb;
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
-  padding: 0.5rem;
+  padding: 0.4rem 0.5rem;
 }
 
 .btn-reset:hover {
   text-decoration: underline;
 }
 
+.state-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 3rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.state-text {
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.error-card {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.error-text {
+  color: #b91c1c;
+  font-size: 0.95rem;
+}
+
+.empty-card {
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 3rem 1.5rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.empty-title {
+  font-weight: 600;
+  color: #334155;
+  font-size: 1rem;
+}
+
+.empty-subtitle {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-primary:hover {
+  background: #1d4ed8;
+}
+
 .table-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  overflow-x: auto;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .queue-table {
   width: 100%;
   border-collapse: collapse;
-  text-align: left;
   font-size: 0.875rem;
-  table-layout: fixed;
+  text-align: left;
 }
 
 .queue-table th {
-  background-color: #f8fafc;
-  padding: 0.75rem 1rem;
-  color: #64748b;
+  background: #f8fafc;
+  color: #475569;
   font-weight: 600;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid #e2e8f0;
 }
 
 .queue-table td {
   padding: 0.85rem 1rem;
-  border-bottom: 1px solid #e2e8f0;
-  color: #0f172a;
+  border-bottom: 1px solid #f1f5f9;
+  color: #1e293b;
   vertical-align: middle;
 }
 
 .clickable-row {
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color 0.12s ease;
 }
 
 .clickable-row:hover {
   background-color: #f8fafc;
 }
 
-.col-id { width: 70px; font-weight: 600; color: #64748b; }
-.col-title { width: 35%; }
-.col-priority { width: 110px; }
-.col-status { width: 130px; }
-.col-assignee { width: 140px; }
-.col-updated { width: 100px; color: #64748b; }
+.col-id {
+  width: 70px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.col-title {
+  min-width: 260px;
+}
 
 .title-line1 {
   font-weight: 600;
   color: #0f172a;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .title-line2 {
   font-size: 0.75rem;
   color: #64748b;
-  margin-top: 0.2rem;
+  margin-top: 2px;
+}
+
+.col-priority {
+  width: 100px;
+}
+
+.col-status {
+  width: 120px;
+}
+
+.col-assignee {
+  width: 140px;
 }
 
 .assignee-text {
   font-weight: 500;
-  color: #0f172a;
+  color: #334155;
 }
 
 .assignee-unassigned {
@@ -402,22 +537,28 @@ function goToDetail(id: number) {
   font-style: italic;
 }
 
+.col-updated {
+  width: 110px;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
 .pagination-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 0.85rem;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
   border-top: 1px solid #e2e8f0;
 }
 
 .page-btn {
-  padding: 0.35rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
   background: #ffffff;
-  font-size: 0.875rem;
-  font-weight: 500;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
   cursor: pointer;
 }
 
@@ -427,40 +568,7 @@ function goToDetail(id: number) {
 }
 
 .page-info {
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   color: #64748b;
-}
-
-.empty-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 3rem 1.5rem;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.empty-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.empty-subtitle {
-  color: #64748b;
-  font-size: 0.875rem;
-}
-
-.btn-primary {
-  background-color: #2563eb;
-  color: #ffffff;
-  border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
 }
 </style>
