@@ -10,6 +10,7 @@ import type { Comment } from '@/Data/Comment'
 import type { User } from '@/Data/User'
 import StatusBadge from '@/components/StatusBadge.vue'
 import PriorityBadge from '@/components/PriorityBadge.vue'
+import RoleBadge from '@/components/RoleBadge.vue'
 import ConfirmModal from '@/components/ConfirmModal.vue'
 
 const route = useRoute()
@@ -17,7 +18,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const { showToast } = useToast()
 
-const ticketId = computed(() => Number(route.params.id))
+const ticketId = computed(() => String(route.params.id))
 
 const ticket = ref<Tickets | null>(null)
 const comments = ref<Comment[]>([])
@@ -30,6 +31,8 @@ const isForbidden = ref(false)
 const newCommentText = ref('')
 const isSubmittingComment = ref(false)
 const showCloseConfirm = ref(false)
+const commentToDelete = ref<Comment | null>(null)
+const isDeletingComment = ref(false)
 
 async function fetchTicketData() {
   isLoading.value = true
@@ -38,21 +41,28 @@ async function fetchTicketData() {
 
   try {
     const id = ticketId.value
-    const [tData, cData, catData, uData] = await Promise.all([
+    const [tData, catData, uData] = await Promise.all([
       api.getTicketById(id),
-      api.getCommentsByTicket(id),
       api.getCategories(),
       api.getUsers(),
     ])
 
-    if (auth.currentUser?.role === 'CLIENT' && tData.CreateBy !== auth.currentUser.id) {
+    if (auth.currentUser?.role === 'CLIENT' && Number(tData.CreateBy) !== Number(auth.currentUser.id)) {
       isForbidden.value = true
       isLoading.value = false
       return
     }
 
+    const queryIds = Array.from(new Set([id, String(tData.TicketID), String(tData.id)].filter(Boolean)))
+    const commentBatches = await Promise.all(
+      queryIds.map((qId) => api.getCommentsByTicket(qId).catch(() => [] as Comment[]))
+    )
+    const mergedComments = Array.from(
+      new Map(commentBatches.flat().map((c) => [(c.id || c.CommentID), c])).values()
+    )
+
     ticket.value = tData
-    comments.value = cData
+    comments.value = mergedComments
     categories.value = catData
     users.value = uData
   } catch {
@@ -66,8 +76,8 @@ onMounted(() => {
   fetchTicketData()
 })
 
-const author = computed(() => users.value.find((u) => u.id === ticket.value?.CreateBy))
-const assignee = computed(() => users.value.find((u) => u.id === ticket.value?.Assignto))
+const author = computed(() => users.value.find((u) => String(u.id) === String(ticket.value?.CreateBy)))
+const assignee = computed(() => users.value.find((u) => String(u.id) === String(ticket.value?.Assignto)))
 const category = computed(() => categories.value.find((c) => c.CategroyID === ticket.value?.CategoryID))
 const techUsers = computed(() => users.value.filter((u) => u.role === 'TECHNICIAN' || u.role === 'ADMIN'))
 
@@ -77,12 +87,12 @@ const isAdmin = computed(() => auth.currentUser?.role === 'ADMIN')
 
 const isAssignedTech = computed(() => {
   if (!ticket.value || !auth.currentUser) return false
-  return ticket.value.Assignto === auth.currentUser.id
+  return String(ticket.value.Assignto) === String(auth.currentUser.id)
 })
 
 const isOtherTech = computed(() => {
   if (!ticket.value || !isTech.value) return false
-  return ticket.value.Assignto !== undefined && ticket.value.Assignto !== auth.currentUser?.id
+  return ticket.value.Assignto !== undefined && String(ticket.value.Assignto) !== String(auth.currentUser?.id)
 })
 
 const canStaffAct = computed(() => {
@@ -127,9 +137,9 @@ async function handleClaim() {
 async function handleAssigneeChange(event: Event) {
   if (!ticket.value || !auth.currentUser) return
   const target = event.target as HTMLSelectElement
-  const newAssigneeId = target.value ? Number(target.value) : undefined
+  const newAssigneeId = target.value ? target.value : undefined
   const now = new Date().toISOString()
-  const assignedUser = users.value.find((u) => u.id === newAssigneeId)
+  const assignedUser = users.value.find((u) => String(u.id) === String(newAssigneeId))
 
   try {
     const updated = await api.updateTicket(ticket.value.id || ticket.value.TicketID, {
@@ -288,8 +298,37 @@ async function handleAddComment() {
   }
 }
 
-function getCommentAuthor(id: number) {
-  return users.value.find((u) => u.id === id)
+function getCommentAuthor(id?: number | string) {
+  if (!id) return null
+  return users.value.find((u) => String(u.id) === String(id))
+}
+
+function getInitials(name?: string): string {
+  if (!name) return '?'
+  const clean = name.trim()
+  const parts = clean.split(/[\s_.-]+/).filter(Boolean)
+  if (parts.length >= 2 && parts[0] && parts[1]) {
+    return (parts[0][0]! + parts[1][0]!).toUpperCase()
+  }
+  return clean.slice(0, 2).toUpperCase()
+}
+
+async function handleConfirmDeleteComment() {
+  if (!commentToDelete.value) return
+  isDeletingComment.value = true
+  try {
+    const id = commentToDelete.value.id || commentToDelete.value.CommentID
+    if (id) {
+      await api.deleteComment(id)
+      comments.value = comments.value.filter((c) => (c.id || c.CommentID) !== id)
+      showToast('Comment deleted', 'success')
+    }
+  } catch {
+    showToast('Failed to delete comment', 'error')
+  } finally {
+    isDeletingComment.value = false
+    commentToDelete.value = null
+  }
 }
 
 function formatDateTime(iso: string) {
@@ -361,41 +400,55 @@ function formatDateTime(iso: string) {
         </div>
 
         <div class="timeline-card">
-          <h2 class="timeline-title">Activity & Discussion</h2>
+          <h2 class="timeline-title">Discussion Timeline</h2>
 
           <div v-if="comments.length === 0" class="no-comments">
-            No activity or comments recorded yet.
+            No comments or activity yet.
           </div>
 
           <div v-else class="comments-list">
-            <div
-              v-for="cmt in comments"
-              :key="cmt.CommentID || cmt.id"
-              class="comment-item"
-              :class="{ 'system-comment': cmt.SystemMessage }"
-            >
-              <div v-if="cmt.SystemMessage" class="sys-msg-body">
-                <span class="sys-bullet">&bull;</span>
-                <span class="sys-text">{{ cmt.Message }}</span>
-                <span class="sys-time">{{ formatDateTime(cmt.creatAt) }}</span>
+            <template v-for="cmt in comments" :key="cmt.CommentID || cmt.id">
+              <div v-if="cmt.SystemMessage" class="system-event">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 8v4l2.5 2.5" stroke-linecap="round" />
+                </svg>
+                <span>{{ cmt.Message }}</span>
+                <span class="system-time">&middot; {{ formatDateTime(cmt.creatAt) }}</span>
               </div>
 
-              <div v-else class="user-msg-body">
-                <div class="msg-header">
-                  <span class="msg-author">{{ getCommentAuthor(cmt.CreateBy)?.username || 'User' }}</span>
-                  <span class="msg-role">{{ getCommentAuthor(cmt.CreateBy)?.role }}</span>
-                  <span class="msg-time">{{ formatDateTime(cmt.creatAt) }}</span>
+              <div v-else class="comment-item">
+                <div class="avatar">{{ getInitials(getCommentAuthor(cmt.CreateBy)?.username) }}</div>
+                <div class="comment-body">
+                  <div class="comment-header">
+                    <div class="comment-author-meta">
+                      <span class="comment-author">{{ getCommentAuthor(cmt.CreateBy)?.username || 'User' }}</span>
+                      <RoleBadge v-if="getCommentAuthor(cmt.CreateBy)?.role" :role="getCommentAuthor(cmt.CreateBy)!.role" />
+                      <span class="comment-time">{{ formatDateTime(cmt.creatAt) }}</span>
+                    </div>
+                    <button
+                      v-if="isAdmin"
+                      type="button"
+                      class="btn-icon"
+                      title="Delete comment"
+                      @click="commentToDelete = cmt"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="comment-text">{{ cmt.Message }}</div>
                 </div>
-                <div class="msg-content">{{ cmt.Message }}</div>
               </div>
-            </div>
+            </template>
           </div>
 
           <div v-if="canPostComment" class="comment-box">
             <textarea
               v-model="newCommentText"
               rows="3"
-              placeholder="Leave a comment or update..."
+              placeholder="Write a comment..."
               class="comment-textarea"
             ></textarea>
             <div class="comment-actions">
@@ -405,9 +458,12 @@ function formatDateTime(iso: string) {
                 :disabled="!newCommentText.trim() || isSubmittingComment"
                 @click="handleAddComment"
               >
-                {{ isSubmittingComment ? 'Posting...' : 'Post Comment' }}
+                {{ isSubmittingComment ? 'Posting...' : 'Post comment' }}
               </button>
             </div>
+          </div>
+          <div v-else class="locked-banner">
+            Commenting is disabled for this ticket.
           </div>
         </div>
       </div>
@@ -513,6 +569,16 @@ function formatDateTime(iso: string) {
       confirm-type="danger"
       @confirm="confirmCloseTicket"
       @cancel="showCloseConfirm = false"
+    />
+
+    <ConfirmModal
+      :open="Boolean(commentToDelete)"
+      title="Delete Comment"
+      message="Are you sure you want to permanently delete this comment?"
+      confirm-text="Delete"
+      confirm-type="danger"
+      @confirm="handleConfirmDeleteComment"
+      @cancel="commentToDelete = null"
     />
   </div>
 </template>
@@ -743,72 +809,110 @@ function formatDateTime(iso: string) {
   gap: 1rem;
 }
 
-.system-comment {
-  padding: 0.4rem 0;
-}
-
-.sys-msg-body {
+.system-event {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
+  justify-content: center;
+  gap: 0.45rem;
   color: #64748b;
-  background: #f8fafc;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  border-left: 3px solid #cbd5e1;
+  font-size: 0.8125rem;
+  text-align: center;
+  padding: 0.35rem 0.75rem;
 }
 
-.sys-bullet {
-  color: #94a3b8;
-  font-size: 1.1rem;
-}
-
-.sys-time {
-  margin-left: auto;
-  color: #94a3b8;
+.system-time {
   font-size: 0.75rem;
+  color: #94a3b8;
 }
 
-.user-msg-body {
-  background: #ffffff;
+.comment-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.9rem;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 1rem;
+  background: #ffffff;
 }
 
-.msg-header {
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #334155;
+  font-weight: 700;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.comment-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.comment-author-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.msg-author {
+.comment-author {
   font-weight: 600;
-  color: #0f172a;
   font-size: 0.875rem;
+  color: #0f172a;
 }
 
-.msg-role {
-  font-size: 0.7rem;
-  background: #f1f5f9;
-  color: #475569;
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-}
-
-.msg-time {
+.comment-time {
   font-size: 0.75rem;
   color: #94a3b8;
-  margin-left: auto;
 }
 
-.msg-content {
+.btn-icon {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.btn-icon:hover {
+  color: #dc2626;
+}
+
+.comment-text {
   font-size: 0.9rem;
   color: #334155;
   white-space: pre-wrap;
   line-height: 1.5;
+  margin: 0;
+}
+
+.locked-banner {
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: center;
 }
 
 .comment-box {

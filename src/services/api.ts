@@ -21,37 +21,71 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   return response.json()
 }
 
+async function getNextId(endpoint: string): Promise<number> {
+  try {
+    const items = await request<any[]>(endpoint)
+    const numericIds = items
+      .map((item) => Number(item.TicketID ?? item.CommentID ?? item.CategroyID ?? item.id))
+      .filter((id) => !isNaN(id))
+    return numericIds.length > 0 ? Math.max(...numericIds) + 1 : items.length + 1
+  } catch {
+    return 1
+  }
+}
+
 export const api = {
   async getTickets(): Promise<Tickets[]> {
     return request<Tickets[]>('/tickets')
   },
 
-  async getTicketById(id: number): Promise<Tickets> {
+  async getTicketById(id: string | number): Promise<Tickets> {
     return request<Tickets>(`/tickets/${id}`)
   },
 
   async createTicket(ticket: Omit<Tickets, 'TicketID'> & { TicketID?: number }): Promise<Tickets> {
+    const nextId = await getNextId('/tickets')
+    const payload = {
+      ...ticket,
+      id: String(nextId),
+      TicketID: nextId,
+    }
     return request<Tickets>('/tickets', {
       method: 'POST',
-      body: JSON.stringify(ticket),
+      body: JSON.stringify(payload),
     })
   },
 
-  async updateTicket(id: number, data: Partial<Tickets>): Promise<Tickets> {
+  async updateTicket(id: string | number, data: Partial<Tickets>): Promise<Tickets> {
     return request<Tickets>(`/tickets/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     })
   },
 
-  async getCommentsByTicket(ticketId: number): Promise<Comment[]> {
-    return request<Comment[]>(`/comments?TicketID=${ticketId}`)
+  async getCommentsByTicket(ticketId: string | number): Promise<Comment[]> {
+    const numericTicketId = Number(ticketId)
+    const query = isNaN(numericTicketId) ? ticketId : numericTicketId
+    return request<Comment[]>(`/comments?TicketID=${query}`)
   },
 
   async addComment(comment: Omit<Comment, 'CommentID'> & { CommentID?: number }): Promise<Comment> {
+    const nextId = await getNextId('/comments')
+    const parsedTicketId = Number(comment.TicketID)
+    const payload = {
+      ...comment,
+      id: String(nextId),
+      CommentID: nextId,
+      TicketID: isNaN(parsedTicketId) ? comment.TicketID : parsedTicketId,
+    }
     return request<Comment>('/comments', {
       method: 'POST',
-      body: JSON.stringify(comment),
+      body: JSON.stringify(payload),
+    })
+  },
+
+  async deleteComment(id: string | number): Promise<void> {
+    await request<void>(`/comments/${id}`, {
+      method: 'DELETE',
     })
   },
 
@@ -60,20 +94,26 @@ export const api = {
   },
 
   async createCategory(category: Omit<Category, 'CategroyID'> & { CategroyID?: number }): Promise<Category> {
+    const nextId = await getNextId('/categories')
+    const payload = {
+      ...category,
+      id: String(nextId),
+      CategroyID: nextId,
+    }
     return request<Category>('/categories', {
       method: 'POST',
-      body: JSON.stringify(category),
+      body: JSON.stringify(payload),
     })
   },
 
-  async updateCategory(id: number, data: Partial<Category>): Promise<Category> {
+  async updateCategory(id: number | string, data: Partial<Category>): Promise<Category> {
     return request<Category>(`/categories/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     })
   },
 
-  async deleteCategory(id: number): Promise<void> {
+  async deleteCategory(id: number | string): Promise<void> {
     await request<void>(`/categories/${id}`, {
       method: 'DELETE',
     })
@@ -83,21 +123,26 @@ export const api = {
     return request<User[]>('/users')
   },
 
-  async createUser(user: Omit<User, 'id'> & { id?: number }): Promise<User> {
+  async createUser(user: Omit<User, 'id'> & { id?: number | string }): Promise<User> {
+    const nextId = await getNextId('/users')
+    const payload = {
+      ...user,
+      id: String(nextId),
+    }
     return request<User>('/users', {
       method: 'POST',
-      body: JSON.stringify(user),
+      body: JSON.stringify(payload),
     })
   },
 
-  async updateUser(id: number, data: Partial<User>): Promise<User> {
+  async updateUser(id: number | string, data: Partial<User>): Promise<User> {
     return request<User>(`/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     })
   },
 
-  async deleteUser(id: number): Promise<void> {
+  async deleteUser(id: number | string): Promise<void> {
     await request<void>(`/users/${id}`, {
       method: 'DELETE',
     })

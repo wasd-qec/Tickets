@@ -126,7 +126,7 @@ function formatRelativeTime(iso: string) {
   return `${diffDays}d ago`
 }
 
-function goToDetail(id: number) {
+function goToDetail(id: string | number) {
   router.push(`/tickets/${id}`)
 }
 </script>
@@ -221,11 +221,11 @@ function goToDetail(id: number) {
         <tbody>
           <tr
             v-for="ticket in paginatedTickets"
-            :key="ticket.TicketID"
+            :key="(ticket as any).id || ticket.TicketID"
             class="clickable-row"
-            @click="goToDetail(ticket.TicketID)"
+            @click="goToDetail((ticket as any).id || ticket.TicketID)"
           >
-            <td class="col-id">#{{ ticket.TicketID }}</td>
+            <td class="col-id">#{{ ticket.TicketID || (ticket as any).id }}</td>
             <td class="col-title">
               <div class="title-line1">{{ ticket.Name }}</div>
               <div class="title-line2">

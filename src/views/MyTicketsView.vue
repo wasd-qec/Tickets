@@ -71,7 +71,7 @@ function formatDate(iso: string) {
   })
 }
 
-function goToDetail(id: number) {
+function goToDetail(id: string | number) {
   router.push(`/tickets/${id}`)
 }
 </script>
@@ -150,12 +150,12 @@ function goToDetail(id: number) {
     <div v-else class="tickets-grid">
       <div
         v-for="ticket in filteredTickets"
-        :key="ticket.TicketID"
+        :key="(ticket as any).id || ticket.TicketID"
         class="ticket-card"
-        @click="goToDetail(ticket.TicketID)"
+        @click="goToDetail((ticket as any).id || ticket.TicketID)"
       >
         <div class="ticket-header">
-          <span class="ticket-id">#{{ ticket.TicketID }}</span>
+          <span class="ticket-id">#{{ ticket.TicketID || (ticket as any).id }}</span>
           <div class="badges">
             <PriorityBadge :priority="ticket.Priority" />
             <StatusBadge :Stage="ticket.Stage" />

@@ -60,13 +60,11 @@
       "Name": "Cannot connect to campus Wi-Fi",
       "Description": "The connection drops constantly every 2 minutes while in the library.",
       "Stage": "Opened",
-      "Priority": "Medium",
-      "CategroyID": 1,
+      "Priority": "High",
+      "CategoryID": 1,
       "CreateBy": 1,
       "CreateAt": "2026-03-20T08:30:00Z",
-      "UpdatedAt": "2026-11-12T06:12:53.348Z",
-      "CategoryID": 2,
-      "Assignto": 3
+      "UpdatedAt": "2026-03-20T08:30:00Z"
     },
     {
       "id": "2",
@@ -75,7 +73,7 @@
       "Description": "Secondary external monitor turns black for a second then comes back on.",
       "Stage": "In Progress",
       "Priority": "Medium",
-      "CategroyID": 2,
+      "CategoryID": 2,
       "Assignto": 3,
       "CreateBy": 1,
       "CreateAt": "2026-03-19T10:15:00Z",
@@ -88,7 +86,7 @@
       "Description": "License expired yesterday, cannot open Adobe suite for design work.",
       "Stage": "Resolved",
       "Priority": "Low",
-      "CategroyID": 3,
+      "CategoryID": 3,
       "Assignto": 3,
       "CreateBy": 2,
       "CreateAt": "2026-03-18T14:00:00Z",
@@ -101,7 +99,7 @@
       "Description": "Locked out of remote VPN after 3 wrong attempts.",
       "Stage": "Closed",
       "Priority": "High",
-      "CategroyID": 4,
+      "CategoryID": 4,
       "Assignto": 4,
       "CreateBy": 2,
       "CreateAt": "2026-03-17T09:00:00Z",
@@ -114,10 +112,23 @@
       "Description": "Printer tray 2 has paper jammed inside and LED blinking red.",
       "Stage": "Opened",
       "Priority": "Medium",
-      "CategroyID": 2,
+      "CategoryID": 2,
       "CreateBy": 1,
       "CreateAt": "2026-03-21T07:45:00Z",
       "UpdatedAt": "2026-03-21T07:45:00Z"
+    },
+    {
+      "id": "6",
+      "TicketID": 6,
+      "Name": "burger",
+      "Description": "sads",
+      "Stage": "In Progress",
+      "Priority": "High",
+      "CategoryID": 2,
+      "CreateBy": 1,
+      "CreateAt": "2026-11-12T07:22:51.676Z",
+      "UpdatedAt": "2026-11-12T08:38:26.608Z",
+      "Assignto": 4
     }
   ],
   "comments": [
@@ -158,45 +169,85 @@
       "creatAt": "2026-03-19T16:45:00Z"
     },
     {
+      "id": "5",
+      "CommentID": 5,
       "TicketID": 1,
-      "CreateBy": "5",
-      "SystemMessage": true,
-      "Message": "Category changed to Network.",
-      "creatAt": "2026-11-12T06:12:19.781Z",
-      "id": "g8gHdxk6roM"
-    },
-    {
-      "TicketID": 1,
-      "CreateBy": "5",
+      "CreateBy": 5,
       "SystemMessage": false,
-      "Message": "hi",
-      "creatAt": "2026-11-12T06:12:25.352Z",
-      "id": "UV_cF48UM-8"
+      "Message": "SA",
+      "creatAt": "2026-11-12T07:51:43.647Z"
     },
     {
+      "id": "6",
+      "CommentID": 6,
       "TicketID": 1,
-      "CreateBy": "5",
+      "CreateBy": 5,
       "SystemMessage": true,
-      "Message": "Priority changed to Medium.",
-      "creatAt": "2026-11-12T06:12:31.347Z",
-      "id": "lnViZT7IjHg"
+      "Message": "Ticket assigned to tech by admin.",
+      "creatAt": "2026-11-12T07:51:45.782Z"
     },
     {
-      "TicketID": 1,
-      "CreateBy": "5",
+      "id": "7",
+      "CommentID": 7,
+      "TicketID": 6,
+      "CreateBy": 5,
+      "SystemMessage": false,
+      "Message": "SADAS",
+      "creatAt": "2026-11-12T07:56:28.369Z"
+    },
+    {
+      "id": "8",
+      "CommentID": 8,
+      "TicketID": 6,
+      "CreateBy": 5,
       "SystemMessage": true,
-      "Message": "Ticket unassigned by admin.",
-      "creatAt": "2026-11-12T06:12:33.279Z",
-      "id": "oV5tmDEY4Dc"
+      "Message": "Ticket assigned to admin by admin.",
+      "creatAt": "2026-11-12T07:56:32.386Z"
     },
     {
-      "TicketID": 1,
-      "CreateBy": "5",
+      "id": "9",
+      "CommentID": 9,
+      "TicketID": 6,
+      "CreateBy": 5,
+      "SystemMessage": true,
+      "Message": "Ticket assigned to tech2 by admin.",
+      "creatAt": "2026-11-12T07:56:35.289Z"
+    },
+    {
+      "id": "10",
+      "CommentID": 10,
+      "TicketID": 6,
+      "CreateBy": 5,
       "SystemMessage": true,
       "Message": "Category changed to Hardware.",
-      "creatAt": "2026-11-12T06:12:53.348Z",
-      "id": "GAtY2toYVBs"
+      "creatAt": "2026-11-12T07:56:37.015Z"
+    },
+    {
+      "id": "11",
+      "CommentID": 11,
+      "TicketID": 6,
+      "CreateBy": 5,
+      "SystemMessage": true,
+      "Message": "Priority changed to High.",
+      "creatAt": "2026-11-12T07:56:38.117Z"
+    },
+    {
+      "id": "12",
+      "CommentID": 12,
+      "TicketID": 6,
+      "CreateBy": 5,
+      "SystemMessage": true,
+      "Message": "Status changed to In Progress.",
+      "creatAt": "2026-11-12T07:56:39.978Z"
+    },
+    {
+      "id": "13",
+      "CommentID": 13,
+      "TicketID": 6,
+      "CreateBy": 1,
+      "SystemMessage": false,
+      "Message": "sasdad",
+      "creatAt": "2026-11-12T08:38:26.608Z"
     }
-  ],
-  "$schema": "./node_modules/json-server/schema.json"
+  ]
 }

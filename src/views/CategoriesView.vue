@@ -104,8 +104,8 @@ async function handleSaveCategory() {
     } else if (modalMode.value === 'edit' && editingCategoryId.value !== null) {
       const targetCat = categories.value.find((c) => c.CategroyID === editingCategoryId.value)
       if (targetCat) {
-        const targetId = (targetCat as any).id || targetCat.CategroyID
-        await api.updateCategory(targetId, { name: trimmed })
+        const targetId = targetCat.id || targetCat.CategroyID
+        await api.updateCategory(targetId as number, { name: trimmed })
         targetCat.name = trimmed
         showToast('Category updated', 'success')
       }
@@ -134,8 +134,8 @@ async function handleDelete() {
   showDeleteConfirm.value = false
 
   try {
-    const targetId = (cat as any).id || cat.CategroyID
-    await api.deleteCategory(targetId)
+    const targetId = cat.id || cat.CategroyID
+    await api.deleteCategory(targetId as number)
     categories.value = categories.value.filter((c) => c.CategroyID !== cat.CategroyID)
     showToast('Category deleted', 'success')
   } catch {

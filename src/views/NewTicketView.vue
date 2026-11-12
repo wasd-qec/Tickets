@@ -25,8 +25,9 @@ const isSubmitting = ref(false)
 async function fetchCategories() {
   try {
     categories.value = await api.getCategories()
-    if (categories.value.length > 0 && categoryId.value === '') {
-      categoryId.value = categories.value[0].CategroyID
+    const firstCat = categories.value[0]
+    if (firstCat && categoryId.value === '') {
+      categoryId.value = firstCat.CategroyID
     }
   } catch {
     submitError.value = 'Failed to load categories. Please ensure mock API server is running.'
@@ -59,7 +60,9 @@ async function handleSubmit() {
   isSubmitting.value = true
   try {
     const now = new Date().toISOString()
+    const numericId = Math.floor(1000 + Math.random() * 9000)
     const newTicket = await api.createTicket({
+      TicketID: numericId,
       Name: title.value.trim(),
       Description: description.value.trim(),
       Stage: 'Opened',
@@ -71,8 +74,8 @@ async function handleSubmit() {
     })
 
     showToast('Ticket created successfully!', 'success')
-    const createdId = newTicket.TicketID || newTicket.id || 1
-    router.push(`/tickets/${createdId}`)
+    const targetId = newTicket.id || newTicket.TicketID || numericId
+    router.push(`/tickets/${targetId}`)
   } catch {
     submitError.value = 'Failed to create ticket. Please check connection and try again.'
     showToast('Error creating ticket', 'error')

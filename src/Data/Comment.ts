@@ -1,8 +1,10 @@
 export interface Comment {
-    CommentID: number
+    id?: number | string
+    CommentID?: number
     creatAt: string
-    AuthorID: number
+    AuthorID?: number | string
+    CreateBy?: number | string
     SystemMessage: boolean
-    Message: String
-    TicketID: number
+    Message: string
+    TicketID: number | string
 }
