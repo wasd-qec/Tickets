@@ -34,127 +34,118 @@
   "categories": [
     {
       "id": "1",
-      "CategroyID": 1,
-      "name": "Network"
+      "name": "Network",
+      "description": "Internet, Wi-Fi, switches, and connectivity issues"
     },
     {
       "id": "2",
-      "CategroyID": 2,
-      "name": "Hardware"
+      "name": "Hardware",
+      "description": "Monitors, keyboards, printers, and workstation components"
     },
     {
       "id": "3",
-      "CategroyID": 3,
-      "name": "Software"
+      "name": "Software",
+      "description": "Operating system, enterprise tools, and license renewals"
     },
     {
       "id": "4",
-      "CategroyID": 4,
-      "name": "Account & Access"
+      "name": "Account & Access",
+      "description": "Password resets, permissions, and multi-factor auth"
     }
   ],
   "tickets": [
     {
       "id": "1",
-      "TicketID": 1,
-      "Name": "Cannot connect to campus Wi-Fi",
-      "Description": "The connection drops constantly every 2 minutes while in the library.",
-      "Stage": "Opened",
-      "Priority": "High",
-      "CategoryID": 1,
-      "CreateBy": 1,
-      "CreateAt": "2026-03-20T08:30:00Z",
-      "UpdatedAt": "2026-03-20T08:30:00Z"
+      "title": "Cannot connect to campus Wi-Fi",
+      "description": "The connection drops constantly every 2 minutes while in the library.",
+      "status": "OPEN",
+      "priority": "HIGH",
+      "categoryId": 1,
+      "authorId": 1,
+      "createdAt": "2026-03-20T08:30:00Z",
+      "updatedAt": "2026-03-20T08:30:00Z"
     },
     {
       "id": "2",
-      "TicketID": 2,
-      "Name": "Monitor flickering randomly",
-      "Description": "Secondary external monitor turns black for a second then comes back on.",
-      "Stage": "In Progress",
-      "Priority": "Medium",
-      "CategoryID": 2,
-      "Assignto": 3,
-      "CreateBy": 1,
-      "CreateAt": "2026-03-19T10:15:00Z",
-      "UpdatedAt": "2026-03-20T09:00:00Z"
+      "title": "Monitor flickering randomly",
+      "description": "Secondary external monitor turns black for a second then comes back on.",
+      "status": "IN_PROGRESS",
+      "priority": "MEDIUM",
+      "categoryId": 2,
+      "authorId": 1,
+      "assignedToId": 3,
+      "createdAt": "2026-03-19T10:15:00Z",
+      "updatedAt": "2026-03-20T09:00:00Z"
     },
     {
       "id": "3",
-      "TicketID": 3,
-      "Name": "Need Photoshop license renewal",
-      "Description": "License expired yesterday, cannot open Adobe suite for design work.",
-      "Stage": "Resolved",
-      "Priority": "Low",
-      "CategoryID": 3,
-      "Assignto": 3,
-      "CreateBy": 2,
-      "CreateAt": "2026-03-18T14:00:00Z",
-      "UpdatedAt": "2026-03-19T16:45:00Z"
+      "title": "Need Photoshop license renewal",
+      "description": "License expired yesterday, cannot open Adobe suite for design work.",
+      "status": "RESOLVED",
+      "priority": "LOW",
+      "categoryId": 3,
+      "authorId": 2,
+      "assignedToId": 3,
+      "createdAt": "2026-03-18T14:00:00Z",
+      "updatedAt": "2026-03-19T16:45:00Z"
     },
     {
       "id": "4",
-      "TicketID": 4,
-      "Name": "VPN password reset needed",
-      "Description": "Locked out of remote VPN after 3 wrong attempts.",
-      "Stage": "Closed",
-      "Priority": "High",
-      "CategoryID": 4,
-      "Assignto": 4,
-      "CreateBy": 2,
-      "CreateAt": "2026-03-17T09:00:00Z",
-      "UpdatedAt": "2026-03-18T11:20:00Z"
+      "title": "VPN password reset needed",
+      "description": "Locked out of remote VPN after 3 wrong attempts.",
+      "status": "CLOSED",
+      "priority": "HIGH",
+      "categoryId": 4,
+      "authorId": 2,
+      "assignedToId": 4,
+      "createdAt": "2026-03-17T09:00:00Z",
+      "updatedAt": "2026-03-18T11:20:00Z",
+      "closedAt": "2026-03-18T11:20:00Z"
     },
     {
       "id": "5",
-      "TicketID": 5,
-      "Name": "Printer paper jam in Hall B",
-      "Description": "Printer tray 2 has paper jammed inside and LED blinking red.",
-      "Stage": "Opened",
-      "Priority": "Medium",
-      "CategoryID": 2,
-      "CreateBy": 1,
-      "CreateAt": "2026-03-21T07:45:00Z",
-      "UpdatedAt": "2026-03-21T07:45:00Z"
+      "title": "Printer paper jam in Hall B",
+      "description": "Printer tray 2 has paper jammed inside and LED blinking red.",
+      "status": "OPEN",
+      "priority": "MEDIUM",
+      "categoryId": 2,
+      "authorId": 1,
+      "createdAt": "2026-03-21T07:45:00Z",
+      "updatedAt": "2026-03-21T07:45:00Z"
     }
   ],
   "comments": [
     {
       "id": "1",
-      "CommentID": 1,
-      "TicketID": 2,
-      "CreateBy": 3,
-      "SystemMessage": true,
-      "Message": "Ticket assigned to tech by admin.",
-      "creatAt": "2026-03-19T10:20:00Z"
+      "ticketId": 2,
+      "authorId": 3,
+      "isSystem": true,
+      "content": "Ticket assigned to tech by admin.",
+      "createdAt": "2026-03-19T10:20:00Z"
     },
     {
       "id": "2",
-      "CommentID": 2,
-      "TicketID": 2,
-      "CreateBy": 3,
-      "SystemMessage": false,
-      "Message": "Please check if the HDMI cable is plugged in firmly or try a different port.",
-      "creatAt": "2026-03-19T10:25:00Z"
+      "ticketId": 2,
+      "authorId": 3,
+      "isSystem": false,
+      "content": "Please check if the HDMI cable is plugged in firmly or try a different port.",
+      "createdAt": "2026-03-19T10:25:00Z"
     },
     {
       "id": "3",
-      "CommentID": 3,
-      "TicketID": 2,
-      "CreateBy": 1,
-      "SystemMessage": false,
-      "Message": "I tested another cable and it still flickers occasionally.",
-      "creatAt": "2026-03-19T11:00:00Z"
+      "ticketId": 2,
+      "authorId": 1,
+      "isSystem": false,
+      "content": "I tested another cable and it still flickers occasionally.",
+      "createdAt": "2026-03-19T11:00:00Z"
     },
     {
       "id": "4",
-      "CommentID": 4,
-      "TicketID": 3,
-      "CreateBy": 3,
-      "SystemMessage": true,
-      "Message": "Status changed to Resolved. License provisioned via enterprise portal.",
-      "creatAt": "2026-03-19T16:45:00Z"
+      "ticketId": 3,
+      "authorId": 3,
+      "isSystem": true,
+      "content": "Status changed to RESOLVED. License provisioned via enterprise portal.",
+      "createdAt": "2026-03-19T16:45:00Z"
     }
   ]
 }
-

@@ -1,21 +1,40 @@
 <script setup lang="ts">
-import type { Priority } from '@/Data/Ticket'
+import type { TicketPriority } from '@/Data/Ticket'
 import { computed } from 'vue'
 
 const props = defineProps<{
-  priority: Priority
+  priority: TicketPriority
 }>()
 
 const priorityClass = computed(() => {
-  if (props.priority === 'High') return 'priority-red'
-  if (props.priority === 'Medium') return 'priority-yellow'
-  if (props.priority === 'Low') return 'priority-gray'
-  return 'priority-gray'
+  switch (props.priority) {
+    case 'HIGH':
+      return 'priority-red'
+    case 'MEDIUM':
+      return 'priority-yellow'
+    case 'LOW':
+      return 'priority-gray'
+    default:
+      return 'priority-gray'
+  }
+})
+
+const label = computed(() => {
+  switch (props.priority) {
+    case 'HIGH':
+      return 'High'
+    case 'MEDIUM':
+      return 'Medium'
+    case 'LOW':
+      return 'Low'
+    default:
+      return props.priority
+  }
 })
 </script>
 
 <template>
-  <span class="badge" :class="priorityClass">{{ priority }}</span>
+  <span class="badge" :class="priorityClass">{{ label }}</span>
 </template>
 
 <style scoped>
@@ -45,4 +64,3 @@ const priorityClass = computed(() => {
   color: #475569;
 }
 </style>
-

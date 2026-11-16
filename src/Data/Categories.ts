@@ -1,5 +1,8 @@
 export interface Category {
-    name: String
-    Description: String
-    CategroyID: number
+  id: number
+  name: string
+  description?: string
+  _count?: {
+    tickets?: number
+  }
 }

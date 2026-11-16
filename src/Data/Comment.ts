@@ -1,8 +1,11 @@
+import type { User } from './User'
+
 export interface Comment {
-    CommentID: number
-    creatAt: string
-    AuthorID: number
-    SystemMessage: boolean
-    Message: String
-    TicketID: number
+  id: number
+  ticketId: number
+  authorId?: number
+  author?: User
+  content: string
+  isSystem: boolean
+  createdAt: string
 }

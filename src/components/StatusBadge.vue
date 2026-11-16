@@ -1,23 +1,48 @@
 <script setup lang="ts">
-import type { Stage } from '@/Data/Ticket'
+import type { TicketStatus } from '@/Data/Ticket'
 import { computed } from 'vue'
 
 const props = defineProps<{
-  Stage: Stage
+  status: TicketStatus
 }>()
 
 const statusClass = computed(() => {
-  if (props.Stage === 'Opened') return 'stage-blue'
-  if (props.Stage === 'In Progress') return 'stage-orange'
-  if (props.Stage === 'Resolved') return 'stage-green'
-  if (props.Stage === 'Closed') return 'stage-gray'
-  if (props.Stage === 'Cancelled') return 'stage-red'
-  return 'stage-gray'
+  switch (props.status) {
+    case 'OPEN':
+      return 'stage-blue'
+    case 'IN_PROGRESS':
+      return 'stage-orange'
+    case 'RESOLVED':
+      return 'stage-green'
+    case 'CLOSED':
+      return 'stage-gray'
+    case 'CANCELLED':
+      return 'stage-red'
+    default:
+      return 'stage-gray'
+  }
+})
+
+const label = computed(() => {
+  switch (props.status) {
+    case 'OPEN':
+      return 'Open'
+    case 'IN_PROGRESS':
+      return 'In Progress'
+    case 'RESOLVED':
+      return 'Resolved'
+    case 'CLOSED':
+      return 'Closed'
+    case 'CANCELLED':
+      return 'Cancelled'
+    default:
+      return props.status
+  }
 })
 </script>
 
 <template>
-  <span class="stage-badge" :class="statusClass">{{ Stage }}</span>
+  <span class="stage-badge" :class="statusClass">{{ label }}</span>
 </template>
 
 <style scoped>
