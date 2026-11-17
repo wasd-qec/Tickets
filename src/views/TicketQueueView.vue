@@ -14,3 +14,8 @@ import type { Ticket } from '@/Data/Ticket'
     <p>Loaded {{ tickets.length }} tickets</p>
   </div>
 </template>
+<style scoped>
+.queue-page {
+  padding: 1.5rem;
+}
+</style>
