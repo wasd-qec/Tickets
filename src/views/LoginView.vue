@@ -2,24 +2,28 @@
 import {ref} from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { mockUsers } from '@/Data/MockData'
+import { getUsers } from '@/services/api'
 
   const username = ref("")
   const password = ref("")
   const router = useRouter()
   const auth = useAuthStore()
-  function handleLogin() {
-  // 1. Look up user in mock data
-  const trimmed = username.value.trim().toLowerCase()
-  const foundUser = mockUsers.find((u) => u.username.toLowerCase() === trimmed)
-  // 2. Validate
-  if (!foundUser) {
-    alert('User not found! Try: alice_client, charlie_tech, or admin_user')
-    return
+ async function handleLogin() {
+  try {
+    const users = await getUsers() // Fetches from db.json (via json-server)
+    const trimmed = username.value.trim()
+    const foundUser = users.find(u => u.username === trimmed)
+    if (!foundUser) {
+      alert('User not found! Try: client, tech, or admin')
+      return
+    }
+    // Save user to Pinia auth store
+    auth.setUser(foundUser)
+    // Redirect to their role dashboard (/tickets for client, /queue for tech/admin)
+    router.push(auth.homeRoute)
+  } catch (error) {
+    alert('Failed to connect to the server. Is json-server running?')
   }
-  // 3. Save to store & navigate to role home (/tickets or /queue)
-  auth.setUser(foundUser)
-  router.push(auth.homeRoute)
 }
 </script> 
 <template>

@@ -48,7 +48,7 @@ const navLinks = computed(() => {
     <div class="body">
       <!-- 2. Left Sidebar -->
       <aside class="sidebar">
-        //the for loop is in the tag RouterLink so it'll print the link label one by one
+        <!-- Render navigation links for the current role -->
         <RouterLink
           v-for="link in navLinks"  
           :key="link.to"

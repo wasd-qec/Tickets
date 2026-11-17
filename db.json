@@ -29,6 +29,12 @@
       "username": "admin",
       "password": "123",
       "role": "ADMIN"
+    },
+    {
+      "username": "saddcs",
+      "password": "sacxcas",
+      "role": "CLIENT",
+      "id": "z9XAnMReGYU"
     }
   ],
   "categories": [
@@ -147,5 +153,6 @@
       "content": "Status changed to RESOLVED. License provisioned via enterprise portal.",
       "createdAt": "2026-03-19T16:45:00Z"
     }
-  ]
+  ],
+  "$schema": "./node_modules/json-server/schema.json"
 }

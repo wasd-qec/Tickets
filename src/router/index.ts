@@ -27,6 +27,7 @@ const router = createRouter({
     },
     {
       path: '/Register',
+      alias: '/register',
       name: 'Register',
       component: () => import('@/views/RegisterView.vue'),
       meta: { public: true },

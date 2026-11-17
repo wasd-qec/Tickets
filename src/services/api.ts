@@ -32,6 +32,8 @@ export async function getNextId(endpoint: string): Promise<number> {
 // User API
 export const getUsers = () => request<User[]>('/users')
 export const getUserById = (id: number | string) => request<User>(`/users/${id}`)
+export const createUser = (data: Partial<User> & { password?: string }) =>
+  request<User>('/users', { method: 'POST', body: JSON.stringify(data) })
 
 // Category API
 export const getCategories = () => request<Category[]>('/categories')
